@@ -8,6 +8,7 @@ import { WasmFactory } from '@lightprotocol/hasher.rs';
 import * as ffjavascript from 'ffjavascript';
 import { FETCH_UTXOS_GROUP_SIZE, INDEXER_API_URL, LSK_ENCRYPTED_OUTPUTS, LSK_FETCH_OFFSET, PROGRAM_ID } from './utils/constants.js';
 import { logger } from './utils/logger.js';
+import type { CacheStorage } from './index.js';
 
 // Use type assertion for the utility functions (same pattern as in get_verification_keys.ts)
 const utils = ffjavascript.utils as any;
@@ -56,7 +57,7 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
     publicKey: PublicKey,
     connection: Connection,
     encryptionService: EncryptionService,
-    storage: Storage
+    storage: CacheStorage
 }): Promise<Utxo[]> {
     if (!getMyUtxosPromise) {
         getMyUtxosPromise = (async () => {
@@ -141,7 +142,7 @@ async function fetchUserUtxos({ publicKey, connection, url, storage, encryptionS
     connection: Connection,
     url: string,
     encryptionService: EncryptionService,
-    storage: Storage
+    storage: CacheStorage
 }): Promise<{
     encryptedOutputs: string[],
     utxos: Utxo[],

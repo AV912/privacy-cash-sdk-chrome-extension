@@ -13,6 +13,7 @@ import { fetchMerkleProof, findCommitmentPDAs, findNullifierPDAs, getExtDataHash
 import { getUtxos, isUtxoSpent } from './getUtxos.js';
 import { logger } from './utils/logger.js';
 import { getConfig } from './config.js';
+import type { CacheStorage } from './index.js';
 // Indexer API endpoint
 
 
@@ -52,7 +53,7 @@ type WithdrawParams = {
     encryptionService: EncryptionService,
     lightWasm: hasher.LightWasm,
     recipient: PublicKey,
-    storage: Storage
+    storage: CacheStorage
 }
 
 export async function withdraw({ recipient, lightWasm, storage, publicKey, connection, amount_in_lamports, encryptionService, keyBasePath }: WithdrawParams) {

@@ -11,6 +11,7 @@ import { getUtxos, isUtxoSpent } from './getUtxos.js';
 import { FIELD_SIZE, FEE_RECIPIENT, MERKLE_TREE_DEPTH, INDEXER_API_URL, PROGRAM_ID } from './utils/constants.js';
 import { useExistingALT } from './utils/address_lookup_table.js';
 import { logger } from './utils/logger.js';
+import type { CacheStorage } from './index.js';
 
 
 // Function to relay pre-signed deposit transaction to indexer backend
@@ -57,7 +58,7 @@ type DepositParams = {
     publicKey: PublicKey,
     connection: Connection,
     amount_in_lamports: number,
-    storage: Storage,
+    storage: CacheStorage,
     encryptionService: EncryptionService,
     keyBasePath: string,
     lightWasm: hasher.LightWasm,

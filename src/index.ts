@@ -8,21 +8,27 @@ import { EncryptionService } from './utils/encryption.js';
 import { WasmFactory } from '@lightprotocol/hasher.rs';
 import bs58 from 'bs58'
 import { withdraw } from './withdraw.js';
-import { LocalStorage } from "node-localstorage";
 import path from 'node:path'
 
-let storage = new LocalStorage(path.join(process.cwd(), "cache"));
+// Storage interface for cache persistence
+export interface CacheStorage {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+    removeItem(key: string): void;
+}
 
 export class PrivacyCash {
     private connection: Connection
     public publicKey: PublicKey
     private encryptionService: EncryptionService
     private keypair: Keypair
+    private storage: CacheStorage
     private isRuning?: boolean = false
     private status: string = ''
-    constructor({ RPC_url, owner, enableDebug }: {
+    constructor({ RPC_url, owner, storage, enableDebug }: {
         RPC_url: string,
         owner: string | number[] | Uint8Array | Keypair,
+        storage?: CacheStorage,
         enableDebug?: boolean
     }) {
         let keypair = getSolanaKeypair(owner)
@@ -34,6 +40,18 @@ export class PrivacyCash {
         this.publicKey = keypair.publicKey
         this.encryptionService = new EncryptionService();
         this.encryptionService.deriveEncryptionKeyFromWallet(this.keypair);
+        
+        // Use provided storage or fall back to browser localStorage or node-localstorage
+        if (storage) {
+            this.storage = storage;
+        } else if (typeof window !== 'undefined' && window.localStorage) {
+            this.storage = window.localStorage as CacheStorage;
+        } else {
+            // Fallback for Node.js environment
+            const { LocalStorage } = require('node-localstorage');
+            this.storage = new LocalStorage(path.join(process.cwd(), 'cache')) as CacheStorage;
+        }
+        
         if (!enableDebug) {
             this.startStatusRender()
             this.setLogger((level, message) => {
@@ -63,8 +81,8 @@ export class PrivacyCash {
         if (!this.publicKey) {
             return this
         }
-        storage.removeItem(LSK_FETCH_OFFSET + localstorageKey(this.publicKey))
-        storage.removeItem(LSK_ENCRYPTED_OUTPUTS + localstorageKey(this.publicKey))
+        this.storage.removeItem(LSK_FETCH_OFFSET + localstorageKey(this.publicKey))
+        this.storage.removeItem(LSK_ENCRYPTED_OUTPUTS + localstorageKey(this.publicKey))
         return this
     }
 
@@ -90,7 +108,7 @@ export class PrivacyCash {
                 return tx
             },
             keyBasePath: path.join(import.meta.dirname, '..', 'circuit2', 'transaction2'),
-            storage
+            storage: this.storage
         })
         this.isRuning = false
         return res
@@ -117,7 +135,7 @@ export class PrivacyCash {
             publicKey: this.publicKey,
             recipient,
             keyBasePath: path.join(import.meta.dirname, '..', 'circuit2', 'transaction2'),
-            storage
+            storage: this.storage
         })
         console.log(`Withdraw successful. Recipient ${recipient} received ${res.amount_in_lamports / LAMPORTS_PER_SOL} SOL, with ${res.fee_in_lamports / LAMPORTS_PER_SOL} SOL relayers fees`)
         this.isRuning = false
@@ -130,7 +148,7 @@ export class PrivacyCash {
     async getPrivateBalance() {
         logger.info('getting private balance')
         this.isRuning = true
-        let utxos = await getUtxos({ publicKey: this.publicKey, connection: this.connection, encryptionService: this.encryptionService, storage })
+        let utxos = await getUtxos({ publicKey: this.publicKey, connection: this.connection, encryptionService: this.encryptionService, storage: this.storage })
         this.isRuning = false
         return getBalanceFromUtxos(utxos)
     }
