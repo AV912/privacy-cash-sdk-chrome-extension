@@ -2,7 +2,7 @@ import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, VersionedTransaction 
 import { deposit } from './deposit.js';
 import { getBalanceFromUtxos, getUtxos, localstorageKey } from './getUtxos.js';
 
-import { LSK_ENCRYPTED_OUTPUTS, LSK_FETCH_OFFSET } from './utils/constants.js';
+import { LSK_ENCRYPTED_OUTPUTS, LSK_FETCH_OFFSET, PROGRAM_ID } from './utils/constants.js';
 import { logger, type LoggerFn, setLogger } from './utils/logger.js';
 import { EncryptionService } from './utils/encryption.js';
 import { WasmFactory } from '@lightprotocol/hasher.rs';
@@ -81,8 +81,16 @@ export class PrivacyCash {
         if (!this.publicKey) {
             return this
         }
-        this.storage.removeItem(LSK_FETCH_OFFSET + localstorageKey(this.publicKey))
-        this.storage.removeItem(LSK_ENCRYPTED_OUTPUTS + localstorageKey(this.publicKey))
+        const storageKeySuffix = await localstorageKey(this.publicKey);
+        this.storage.removeItem(LSK_FETCH_OFFSET + storageKeySuffix)
+        this.storage.removeItem(LSK_ENCRYPTED_OUTPUTS + storageKeySuffix)
+        // Also clear old format keys if they exist (for cleanup)
+        const oldKeySuffix = this.publicKey.toString();
+        const contractPrefix = PROGRAM_ID.toString().substring(0, 6);
+        const oldSuffix = contractPrefix + oldKeySuffix;
+        this.storage.removeItem(LSK_FETCH_OFFSET + oldSuffix)
+        this.storage.removeItem(LSK_ENCRYPTED_OUTPUTS + oldSuffix)
+        this.storage.removeItem('tradeHistory' + oldSuffix)
         return this
     }
 

@@ -38,8 +38,56 @@ function sleep(ms: number): Promise<string> {
     }, ms))
 }
 
-export function localstorageKey(key: PublicKey) {
-    return PROGRAM_ID.toString().substring(0, 6) + key.toString()
+// Cache for hashed public keys to avoid repeated hashing
+const publicKeyHashCache = new Map<string, string>();
+
+/**
+ * Hash a public key using SHA-256 and return base64url-encoded result
+ * Uses Web Crypto API for hashing
+ */
+async function hashPublicKey(publicKey: PublicKey): Promise<string> {
+    const keyString = publicKey.toString();
+    
+    // Check cache first
+    if (publicKeyHashCache.has(keyString)) {
+        return publicKeyHashCache.get(keyString)!;
+    }
+    
+    // Convert public key string to bytes
+    const encoder = new TextEncoder();
+    const data = encoder.encode(keyString);
+    
+    // Hash using Web Crypto API
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    
+    // Convert to base64url (URL-safe base64)
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const base64 = btoa(String.fromCharCode(...hashArray));
+    const base64url = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    
+    // Cache the result
+    publicKeyHashCache.set(keyString, base64url);
+    
+    return base64url;
+}
+
+/**
+ * Generate a storage key from a public key
+ * Uses hashed public key to prevent address leakage
+ * Format: <prefix><5 contract chars><hashed public key>
+ */
+export async function localstorageKey(key: PublicKey): Promise<string> {
+    const contractPrefix = PROGRAM_ID.toString().substring(0, 6);
+    const hashedKey = await hashPublicKey(key);
+    return contractPrefix + hashedKey;
+}
+
+/**
+ * Generate old-format storage key (for migration purposes)
+ * Format: <prefix><5 contract chars><public key>
+ */
+export function localstorageKeyOld(key: PublicKey): string {
+    return PROGRAM_ID.toString().substring(0, 6) + key.toString();
 }
 
 let getMyUtxosPromise: Promise<Utxo[]> | null = null
@@ -53,6 +101,81 @@ let decryptionTaskFinished = 0;
  * @returns Array of decrypted UTXOs that belong to the user
  */
 
+/**
+ * Migrate old-format storage keys to new hashed format
+ * Checks for old keys and migrates data if found
+ */
+async function migrateStorageKeys(publicKey: PublicKey, storage: CacheStorage): Promise<void> {
+    const oldKeySuffix = localstorageKeyOld(publicKey);
+    const newKeySuffix = await localstorageKey(publicKey);
+    
+    // Keys to migrate
+    const keysToMigrate = [
+        { prefix: LSK_FETCH_OFFSET, name: 'fetch_offset' },
+        { prefix: LSK_ENCRYPTED_OUTPUTS, name: 'encrypted_outputs' },
+        { prefix: 'tradeHistory', name: 'tradeHistory' }
+    ];
+    
+    for (const { prefix, name } of keysToMigrate) {
+        const oldKey = prefix + oldKeySuffix;
+        const newKey = prefix + newKeySuffix;
+        
+        // Check if old key exists
+        const oldValue = storage.getItem(oldKey);
+        if (oldValue !== null) {
+            logger.debug(`Migrating ${name} key from old format to new format`);
+            
+            // Read old value
+            const value = oldValue;
+            
+            // Check if new key already exists (partial migration)
+            const newValue = storage.getItem(newKey);
+            if (newValue === null) {
+                // Write to new key
+                storage.setItem(newKey, value);
+                logger.debug(`Migrated ${name} data to new key`);
+            } else {
+                // Merge logic for encrypted_outputs and tradeHistory
+                if (name === 'encrypted_outputs' || name === 'tradeHistory') {
+                    try {
+                        const oldData = name === 'encrypted_outputs' 
+                            ? JSON.parse(value) 
+                            : value.split(',').map(n => Number(n));
+                        const newData = name === 'encrypted_outputs'
+                            ? JSON.parse(newValue)
+                            : newValue.split(',').map(n => Number(n));
+                        
+                        // Merge and deduplicate
+                        if (name === 'encrypted_outputs') {
+                            const merged = [...new Set([...oldData, ...newData])];
+                            storage.setItem(newKey, JSON.stringify(merged));
+                        } else {
+                            const merged = [...new Set([...oldData, ...newData])];
+                            const top20 = merged.sort((a, b) => b - a).slice(0, 20);
+                            storage.setItem(newKey, top20.join(','));
+                        }
+                        logger.debug(`Merged ${name} data from old and new keys`);
+                    } catch (e) {
+                        logger.debug(`Error merging ${name}, keeping new value`);
+                    }
+                } else {
+                    // For fetch_offset, prefer the larger value
+                    const oldNum = Number(value);
+                    const newNum = Number(newValue);
+                    if (oldNum > newNum) {
+                        storage.setItem(newKey, value);
+                        logger.debug(`Updated ${name} with larger value from old key`);
+                    }
+                }
+            }
+            
+            // Delete old key after successful migration
+            storage.removeItem(oldKey);
+            logger.debug(`Deleted old ${name} key`);
+        }
+    }
+}
+
 export async function getUtxos({ publicKey, connection, encryptionService, storage }: {
     publicKey: PublicKey,
     connection: Connection,
@@ -65,7 +188,11 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
             let valid_strings: string[] = []
             let history_indexes: number[] = []
             try {
-                let offsetStr = storage.getItem(LSK_FETCH_OFFSET + localstorageKey(publicKey))
+                // Migrate old keys to new format if needed
+                await migrateStorageKeys(publicKey, storage);
+                
+                const storageKeySuffix = await localstorageKey(publicKey);
+                let offsetStr = storage.getItem(LSK_FETCH_OFFSET + storageKeySuffix)
                 if (offsetStr) {
                     roundStartIndex = Number(offsetStr)
                 } else {
@@ -73,7 +200,7 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
                 }
                 decryptionTaskFinished = 0
                 while (true) {
-                    let offsetStr = storage.getItem(LSK_FETCH_OFFSET + localstorageKey(publicKey))
+                    let offsetStr = storage.getItem(LSK_FETCH_OFFSET + storageKeySuffix)
                     let fetch_utxo_offset = offsetStr ? Number(offsetStr) : 0
                     let fetch_utxo_end = fetch_utxo_offset + FETCH_UTXOS_GROUP_SIZE
                     let fetch_utxo_url = `${INDEXER_API_URL}/utxos/range?start=${fetch_utxo_offset}&end=${fetch_utxo_end}`
@@ -100,7 +227,7 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
                             }
                         }
                     }
-                    storage.setItem(LSK_FETCH_OFFSET + localstorageKey(publicKey), (fetch_utxo_offset + fetched.len).toString())
+                    storage.setItem(LSK_FETCH_OFFSET + storageKeySuffix, (fetch_utxo_offset + fetched.len).toString())
                     if (!fetched.hasMore) {
                         break
                     }
@@ -112,7 +239,8 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
                 getMyUtxosPromise = null
             }
             // get history index
-            let historyKey = 'tradeHistory' + localstorageKey(publicKey)
+            const storageKeySuffix = await localstorageKey(publicKey);
+            let historyKey = 'tradeHistory' + storageKeySuffix
             let rec = storage.getItem(historyKey)
             let recIndexes: number[] = []
             if (rec?.length) {
@@ -130,7 +258,7 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
             logger.debug(`valid_strings len before set: ${valid_strings.length}`)
             valid_strings = [...new Set(valid_strings)];
             logger.debug(`valid_strings len after set: ${valid_strings.length}`)
-            storage.setItem(LSK_ENCRYPTED_OUTPUTS + localstorageKey(publicKey), JSON.stringify(valid_strings))
+            storage.setItem(LSK_ENCRYPTED_OUTPUTS + storageKeySuffix, JSON.stringify(valid_strings))
             return valid_utxos
         })()
     }
@@ -187,7 +315,8 @@ async function fetchUserUtxos({ publicKey, connection, url, storage, encryptionS
     let successfulDecryptions = 0;
 
     let cachedStringNum = 0
-    let cachedString = storage.getItem(LSK_ENCRYPTED_OUTPUTS + localstorageKey(publicKey))
+    const storageKeySuffix = await localstorageKey(publicKey);
+    let cachedString = storage.getItem(LSK_ENCRYPTED_OUTPUTS + storageKeySuffix)
     if (cachedString) {
         cachedStringNum = JSON.parse(cachedString).length
     }
