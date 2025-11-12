@@ -4,8 +4,22 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LoggerFn = (level: LogLevel, message: string) => void;
 
 const defaultLogger: LoggerFn = (level, message) => {
-    const prefix = `[${level.toUpperCase()}]`;
-    console.log(prefix, message);
+    // Use appropriate console method based on level so logging service can capture it
+    switch (level) {
+        case 'error':
+            console.error(message);
+            break;
+        case 'warn':
+            console.warn(message);
+            break;
+        case 'info':
+            console.info(message);
+            break;
+        case 'debug':
+        default:
+            console.log(message);
+            break;
+    }
 };
 
 let userLogger: LoggerFn = defaultLogger;

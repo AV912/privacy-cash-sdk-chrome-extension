@@ -77,10 +77,22 @@ export class PrivacyCash {
         if (!enableDebug) {
             this.startStatusRender()
             this.setLogger((level, message) => {
-                if (level == 'info') {
-                    this.status = message
-                } else if (level == 'error') {
-                    console.log('error message: ', message)
+                // Always log to console so logging service can capture it
+                switch (level) {
+                    case 'error':
+                        console.error(message);
+                        break;
+                    case 'warn':
+                        console.warn(message);
+                        break;
+                    case 'info':
+                        this.status = message; // Store for status display
+                        console.info(message); // Also log to console for capture
+                        break;
+                    case 'debug':
+                    default:
+                        console.log(message);
+                        break;
                 }
             })
         }
@@ -192,6 +204,8 @@ export class PrivacyCash {
      * Returns the amount of lamports current wallet has in Privacy Cash.
      */
     async getPrivateBalance() {
+        // Use console.info directly to ensure logs are captured
+        console.info('🔐 [PRIVACY] Getting private balance...');
         logger.info('getting private balance')
         this.isRuning = true
         let utxos = await getUtxos({ 

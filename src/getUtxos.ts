@@ -138,6 +138,16 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
     const hashedKeySuffix = await localstorageKey(publicKey, null); // Hashed format (no encryption key)
     const newKeySuffix = await localstorageKey(publicKey, encryptionKey); // Encrypted or hashed depending on encryption key
     
+    // Log migration start - use console.info directly to ensure capture
+    const hasEncryptionKey = !!encryptionKey;
+    const willEncrypt = hasEncryptionKey && hashedKeySuffix !== newKeySuffix;
+    const logMsg1 = `🔄 [MIGRATION] Starting storage key migration for wallet ${publicKey.toString().slice(0, 8)}...`;
+    const logMsg2 = `🔐 [MIGRATION] Encryption key available: ${hasEncryptionKey ? 'YES' : 'NO'} (will ${willEncrypt ? 'encrypt' : 'hash'} keys)`;
+    console.info(logMsg1);
+    console.info(logMsg2);
+    logger.info(logMsg1);
+    logger.info(logMsg2);
+    
     // Keys to migrate
     const keysToMigrate = [
         { prefix: LSK_FETCH_OFFSET, name: 'fetch_offset' },
@@ -146,6 +156,8 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
     ];
     
     const oldKeysToDelete: string[] = [];
+    let migratedFromOld = 0;
+    let migratedFromHashed = 0;
     
     for (const { prefix, name } of keysToMigrate) {
         const oldKey = prefix + oldKeySuffix;
@@ -158,14 +170,19 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
         // First, migrate from old format (unhashed) if it exists
         const oldValue = storage.getItem(oldKey);
         if (oldValue !== null) {
-            logger.debug(`Migrating ${name} key from old format to new format`);
+            const msg = `🔄 [MIGRATION] Found old-format ${name} key (contains unhashed public key)`;
+            console.info(msg);
+            logger.info(msg);
             
             // Check if new key already exists (partial migration)
             const newValue = storage.getItem(newKey);
             if (newValue === null) {
                 // Write to new key
                 storage.setItem(newKey, oldValue);
-                logger.debug(`Migrated ${name} data to new key`);
+                const msg = `✅ [MIGRATION] Migrated ${name} from old format → ${willEncrypt ? 'encrypted' : 'hashed'} format`;
+                console.info(msg);
+                logger.info(msg);
+                migratedFromOld++;
             } else {
                 // Merge logic for encrypted_outputs and tradeHistory
                 if (name === 'encrypted_outputs' || name === 'tradeHistory') {
@@ -186,9 +203,10 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                             const top20 = merged.sort((a, b) => b - a).slice(0, 20);
                             storage.setItem(newKey, top20.join(','));
                         }
-                        logger.debug(`Merged ${name} data from old and new keys`);
+                        logger.info(`✅ [MIGRATION] Merged ${name} data from old and new keys`);
+                        migratedFromOld++;
                     } catch (e) {
-                        logger.debug(`Error merging ${name}, keeping new value`);
+                        logger.info(`⚠️ [MIGRATION] Error merging ${name}, keeping new value`);
                     }
                 } else {
                     // For fetch_offset, prefer the larger value
@@ -196,7 +214,8 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                     const newNum = Number(newValue);
                     if (oldNum > newNum) {
                         storage.setItem(newKey, oldValue);
-                        logger.debug(`Updated ${name} with larger value from old key`);
+                        logger.info(`✅ [MIGRATION] Updated ${name} with larger value from old key`);
+                        migratedFromOld++;
                     }
                 }
             }
@@ -212,14 +231,19 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
         if (needsMigration) {
             const hashedValue = storage.getItem(hashedKey);
             if (hashedValue !== null) {
-                logger.debug(`Migrating ${name} key from hashed format to encrypted format`);
+                const msg = `🔄 [MIGRATION] Found hashed-format ${name} key (migrating to encrypted format)`;
+                console.info(msg);
+                logger.info(msg);
                 
                 // Check if encrypted key already exists
                 const encryptedValue = storage.getItem(newKey);
                 if (encryptedValue === null) {
                     // Write to encrypted key
                     storage.setItem(newKey, hashedValue);
-                    logger.debug(`Migrated ${name} data from hashed to encrypted key`);
+                    const msg = `✅ [MIGRATION] Migrated ${name} from hashed → encrypted format`;
+                    console.info(msg);
+                    logger.info(msg);
+                    migratedFromHashed++;
                 } else {
                     // Merge logic for encrypted_outputs and tradeHistory
                     if (name === 'encrypted_outputs' || name === 'tradeHistory') {
@@ -240,9 +264,10 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                                 const top20 = merged.sort((a, b) => b - a).slice(0, 20);
                                 storage.setItem(newKey, top20.join(','));
                             }
-                            logger.debug(`Merged ${name} data from hashed and encrypted keys`);
+                            logger.info(`✅ [MIGRATION] Merged ${name} data from hashed and encrypted keys`);
+                            migratedFromHashed++;
                         } catch (e) {
-                            logger.debug(`Error merging ${name}, keeping encrypted value`);
+                            logger.info(`⚠️ [MIGRATION] Error merging ${name}, keeping encrypted value`);
                         }
                     } else {
                         // For fetch_offset, prefer the larger value
@@ -250,7 +275,8 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                         const encryptedNum = Number(encryptedValue);
                         if (hashedNum > encryptedNum) {
                             storage.setItem(newKey, hashedValue);
-                            logger.debug(`Updated ${name} with larger value from hashed key`);
+                            logger.info(`✅ [MIGRATION] Updated ${name} with larger value from hashed key`);
+                            migratedFromHashed++;
                         }
                     }
                 }
@@ -259,6 +285,18 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                 oldKeysToDelete.push(hashedKey);
             }
         }
+    }
+    
+    // Log migration summary
+    const totalMigrated = migratedFromOld + migratedFromHashed;
+    if (totalMigrated > 0) {
+        const msg = `📊 [MIGRATION] Migration summary: ${migratedFromOld} keys migrated from old format, ${migratedFromHashed} keys migrated from hashed format`;
+        console.info(msg);
+        logger.info(msg);
+    } else {
+        const msg = `ℹ️ [MIGRATION] No keys needed migration (all keys already in ${willEncrypt ? 'encrypted' : 'hashed'} format)`;
+        console.info(msg);
+        logger.info(msg);
     }
     
     // Delete old keys from Chrome storage
@@ -279,11 +317,15 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                 // Fallback to adapter method
                 await Promise.all(oldKeysToDelete.map(key => storage.removeItem(key)));
             }
-            logger.debug(`Deleted ${oldKeysToDelete.length} old storage keys`);
+            const msg = `🗑️ [MIGRATION] Deleted ${oldKeysToDelete.length} old/hashed storage keys from Chrome storage`;
+            console.info(msg);
+            logger.info(msg);
         } catch (err) {
-            logger.debug(`Error deleting old keys: ${err}`);
+            logger.info(`⚠️ [MIGRATION] Error deleting old keys: ${err}`);
             // Continue anyway - keys may still be deleted
         }
+    } else {
+        logger.info(`✅ [MIGRATION] Migration completed - no old keys to delete`);
     }
 }
 
@@ -300,6 +342,11 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
             let valid_strings: string[] = []
             let history_indexes: number[] = []
             try {
+                // Log that we're starting UTXO fetch (which triggers migration) - use console.info directly
+                const utxoLogMsg = `🔄 [UTXO] Starting UTXO fetch for wallet ${publicKey.toString().slice(0, 8)}...`;
+                console.info(utxoLogMsg);
+                logger.info(utxoLogMsg);
+                
                 // Migrate old keys to new format if needed
                 await migrateStorageKeys(publicKey, storage, storageKeyEncryptionKey);
                 
