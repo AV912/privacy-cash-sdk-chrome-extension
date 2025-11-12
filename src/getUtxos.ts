@@ -146,24 +146,37 @@ export async function migrateMultipleWalletsKeys(
     storage: CacheStorage,
     encryptionKey: string
 ): Promise<void> {
+    console.log(`🔄 [MIGRATION] migrateMultipleWalletsKeys called with ${publicKeys.length} wallets`);
+    console.log(`🔐 [MIGRATION] Encryption key provided: ${!!encryptionKey}, Type: ${typeof encryptionKey}, Length: ${encryptionKey ? encryptionKey.length : 0}`);
+    console.error(`🔄 [MIGRATION ERROR CHANNEL] migrateMultipleWalletsKeys called with ${publicKeys.length} wallets`);
+    console.error(`🔐 [MIGRATION ERROR CHANNEL] Encryption key provided: ${!!encryptionKey}`);
+    
     if (!encryptionKey || publicKeys.length === 0) {
+        console.warn(`⚠️ [MIGRATION] Skipping migration - encryption key: ${!!encryptionKey}, wallets: ${publicKeys.length}`);
+        console.error(`⚠️ [MIGRATION ERROR CHANNEL] Skipping migration - encryption key: ${!!encryptionKey}, wallets: ${publicKeys.length}`);
         return;
     }
     
     console.log(`🔄 [MIGRATION] Migrating keys for ${publicKeys.length} wallets to encrypted format...`);
+    console.error(`🔄 [MIGRATION ERROR CHANNEL] Migrating keys for ${publicKeys.length} wallets`);
     
     let totalMigrated = 0;
     for (const publicKeyStr of publicKeys) {
         try {
+            console.log(`🔄 [MIGRATION] Processing wallet ${publicKeyStr.slice(0, 8)}... (${totalMigrated + 1}/${publicKeys.length})`);
+            console.error(`🔄 [MIGRATION ERROR CHANNEL] Processing wallet ${publicKeyStr.slice(0, 8)}...`);
             const publicKey = new PublicKey(publicKeyStr);
             await migrateStorageKeys(publicKey, storage, encryptionKey);
             totalMigrated++;
+            console.log(`✅ [MIGRATION] Successfully migrated wallet ${publicKeyStr.slice(0, 8)}...`);
         } catch (error) {
             console.error(`❌ [MIGRATION] Error migrating keys for wallet ${publicKeyStr.slice(0, 8)}...:`, error);
+            console.error(`❌ [MIGRATION ERROR CHANNEL] Error migrating wallet ${publicKeyStr.slice(0, 8)}...:`, error);
         }
     }
     
     console.log(`✅ [MIGRATION] Completed migration for ${totalMigrated}/${publicKeys.length} wallets`);
+    console.error(`✅ [MIGRATION ERROR CHANNEL] Completed migration for ${totalMigrated}/${publicKeys.length} wallets`);
 }
 
 export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheStorage, encryptionKey?: string | null): Promise<void> {
@@ -192,17 +205,33 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
     // Log migration start - use console.log directly to ensure visibility
     const hasEncryptionKey = !!encryptionKey;
     const willEncrypt = hasEncryptionKey && hashedKeySuffix !== newKeySuffix;
+    const suffixesMatch = hashedKeySuffix === newKeySuffix;
+    
+    // CRITICAL DEBUG: Log full key details
+    console.log('%c🔍 [MIGRATION DEBUG] Full key comparison:', 'color: red; font-size: 14px; font-weight: bold;');
+    console.log(`  Encryption key provided: ${hasEncryptionKey ? 'YES' : 'NO'}`);
+    console.log(`  Encryption key type: ${typeof encryptionKey}`);
+    console.log(`  Encryption key length: ${encryptionKey ? encryptionKey.length : 0}`);
+    console.log(`  Hashed suffix (full): ${hashedKeySuffix}`);
+    console.log(`  New suffix (full): ${newKeySuffix}`);
+    console.log(`  Suffixes match: ${suffixesMatch}`);
+    console.log(`  Will encrypt: ${willEncrypt}`);
+    console.error(`🔍 [MIGRATION DEBUG ERROR CHANNEL] Encryption key: ${hasEncryptionKey ? 'YES' : 'NO'}, Suffixes match: ${suffixesMatch}, Will encrypt: ${willEncrypt}`);
+    
     const logMsg1 = `🔄 [MIGRATION] Starting storage key migration for wallet ${publicKey.toString().slice(0, 8)}...`;
     const logMsg2 = `🔐 [MIGRATION] Encryption key available: ${hasEncryptionKey ? 'YES' : 'NO'} (will ${willEncrypt ? 'encrypt' : 'hash'} keys)`;
     const logMsg3 = `🔍 [MIGRATION] Key suffixes - Old: ${oldKeySuffix.slice(0, 20)}..., Hashed: ${hashedKeySuffix.slice(0, 20)}..., New: ${newKeySuffix.slice(0, 20)}...`;
+    const logMsg4 = `⚠️ [MIGRATION] Suffixes match: ${suffixesMatch} (this should be FALSE if encryption is working)`;
     
     // Use multiple logging methods to ensure visibility
     console.log('%c' + logMsg1, 'color: purple; font-size: 16px; font-weight: bold;');
     console.log('%c' + logMsg2, 'color: purple; font-size: 14px; font-weight: bold;');
     console.log('%c' + logMsg3, 'color: purple; font-size: 12px;');
+    console.log('%c' + logMsg4, 'color: orange; font-size: 14px; font-weight: bold;');
     console.error(`🔄 [MIGRATION ERROR CHANNEL] ${logMsg1}`);
     console.error(`🔐 [MIGRATION ERROR CHANNEL] ${logMsg2}`);
     console.error(`🔍 [MIGRATION ERROR CHANNEL] ${logMsg3}`);
+    console.error(`⚠️ [MIGRATION ERROR CHANNEL] ${logMsg4}`);
     
     // Also try window.console if available
     if (typeof window !== 'undefined' && window.console) {
@@ -212,6 +241,7 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
     logger.info(logMsg1);
     logger.info(logMsg2);
     logger.info(logMsg3);
+    logger.info(logMsg4);
     
     // Keys to migrate
     const keysToMigrate = [
@@ -229,8 +259,21 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
         const hashedKey = prefix + hashedKeySuffix;
         const newKey = prefix + newKeySuffix;
         
-        // Skip if new key is the same as hashed key (no encryption key available)
-        const needsMigration = encryptionKey && hashedKeySuffix !== newKeySuffix;
+        // CRITICAL: Migrate from hashed to encrypted if encryption key is provided AND suffixes differ
+        // If suffixes match, encryption isn't working, so we can't migrate
+        const suffixesDiffer = hashedKeySuffix !== newKeySuffix;
+        const needsMigration = !!encryptionKey && suffixesDiffer;
+        
+        // Debug logging for each key
+        if (encryptionKey) {
+            console.log(`🔍 [MIGRATION] Key: ${name}, Hashed: ${hashedKey.slice(0, 50)}..., New: ${newKey.slice(0, 50)}..., Suffixes differ: ${suffixesDiffer}, Needs migration: ${needsMigration}`);
+            console.error(`🔍 [MIGRATION ERROR CHANNEL] Key: ${name}, Suffixes differ: ${suffixesDiffer}, Needs migration: ${needsMigration}`);
+            
+            if (!suffixesDiffer) {
+                console.warn(`⚠️ [MIGRATION] Encryption key provided but suffixes match - encryption may not be working for key ${name}`);
+                console.error(`⚠️ [MIGRATION ERROR CHANNEL] Encryption key provided but suffixes match - encryption may not be working`);
+            }
+        }
         
         // First, migrate from old format (unhashed) if it exists
         // Check both cache and Chrome storage directly
