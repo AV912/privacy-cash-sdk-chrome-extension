@@ -336,7 +336,13 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
     storage: CacheStorage,
     storageKeyEncryptionKey?: string | null
 }): Promise<Utxo[]> {
+    // CRITICAL: Log immediately when function is called (before promise check)
+    console.info(`🔍 [SDK] getUtxos() called for wallet ${publicKey.toString().slice(0, 8)}...`);
+    console.info(`🔍 [SDK] Promise cache status: ${getMyUtxosPromise ? 'EXISTS' : 'NULL'}`);
+    console.info(`🔍 [SDK] Encryption key provided: ${storageKeyEncryptionKey ? 'YES' : 'NO'}`);
+    
     if (!getMyUtxosPromise) {
+        console.info(`🔍 [SDK] Creating new promise - migration will run`);
         getMyUtxosPromise = (async () => {
             let valid_utxos: Utxo[] = []
             let valid_strings: string[] = []
@@ -395,6 +401,7 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
             } catch (e: any) {
                 throw e
             } finally {
+                console.info(`🔍 [SDK] Clearing promise cache`);
                 getMyUtxosPromise = null
             }
             // get history index
@@ -420,6 +427,8 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
             storage.setItem(LSK_ENCRYPTED_OUTPUTS + storageKeySuffix, JSON.stringify(valid_strings))
             return valid_utxos
         })()
+    } else {
+        console.info(`🔍 [SDK] Using cached promise - migration already ran`);
     }
     return getMyUtxosPromise
 }
