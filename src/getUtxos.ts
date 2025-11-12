@@ -134,6 +134,24 @@ let decryptionTaskFinished = 0;
  * @param encryptionKey - Optional encryption key for encrypting storage keys
  */
 export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheStorage, encryptionKey?: string | null): Promise<void> {
+    // CRITICAL: Write a marker to storage to verify this function is executing
+    // Use storage adapter (consistent with SDK pattern) but also try chrome.storage directly
+    try {
+        const testMarker = `Migration executed at ${Date.now()} for wallet ${publicKey.toString().slice(0, 8)}`;
+        storage.setItem('SDK_MIGRATION_TEST', testMarker);
+        
+        // Also write directly to chrome.storage as backup (for verification)
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            await new Promise<void>((resolve) => {
+                chrome.storage.local.set({ 
+                    'SDK_MIGRATION_TEST_DIRECT': testMarker
+                }, () => resolve());
+            });
+        }
+    } catch (e) {
+        // Ignore errors - marker is just for debugging
+    }
+    
     const oldKeySuffix = localstorageKeyOld(publicKey);
     const hashedKeySuffix = await localstorageKey(publicKey, null); // Hashed format (no encryption key)
     const newKeySuffix = await localstorageKey(publicKey, encryptionKey); // Encrypted or hashed depending on encryption key
@@ -143,12 +161,24 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
     const willEncrypt = hasEncryptionKey && hashedKeySuffix !== newKeySuffix;
     const logMsg1 = `🔄 [MIGRATION] Starting storage key migration for wallet ${publicKey.toString().slice(0, 8)}...`;
     const logMsg2 = `🔐 [MIGRATION] Encryption key available: ${hasEncryptionKey ? 'YES' : 'NO'} (will ${willEncrypt ? 'encrypt' : 'hash'} keys)`;
+    const logMsg3 = `🔍 [MIGRATION] Key suffixes - Old: ${oldKeySuffix.slice(0, 20)}..., Hashed: ${hashedKeySuffix.slice(0, 20)}..., New: ${newKeySuffix.slice(0, 20)}...`;
+    
+    // Use multiple logging methods to ensure visibility
     console.log('%c' + logMsg1, 'color: purple; font-size: 16px; font-weight: bold;');
     console.log('%c' + logMsg2, 'color: purple; font-size: 14px; font-weight: bold;');
+    console.log('%c' + logMsg3, 'color: purple; font-size: 12px;');
     console.error(`🔄 [MIGRATION ERROR CHANNEL] ${logMsg1}`);
     console.error(`🔐 [MIGRATION ERROR CHANNEL] ${logMsg2}`);
+    console.error(`🔍 [MIGRATION ERROR CHANNEL] ${logMsg3}`);
+    
+    // Also try window.console if available
+    if (typeof window !== 'undefined' && window.console) {
+        window.console.log('🔄 [MIGRATION WINDOW.CONSOLE]', logMsg1);
+    }
+    
     logger.info(logMsg1);
     logger.info(logMsg2);
+    logger.info(logMsg3);
     
     // Keys to migrate
     const keysToMigrate = [
