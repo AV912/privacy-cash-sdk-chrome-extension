@@ -10,8 +10,8 @@ import bs58 from 'bs58'
 import { withdraw } from './withdraw.js';
 import path from 'node:path'
 
-// Re-export migrateStorageKeys for direct use
-export { migrateStorageKeys } from './getUtxos.js';
+// Re-export migrateStorageKeys and migrateMultipleWalletsKeys for direct use
+export { migrateStorageKeys, migrateMultipleWalletsKeys } from './getUtxos.js';
 
 // Storage interface for cache persistence
 export interface CacheStorage {

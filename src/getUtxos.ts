@@ -133,6 +133,39 @@ let decryptionTaskFinished = 0;
  * @param storage - The cache storage adapter
  * @param encryptionKey - Optional encryption key for encrypting storage keys
  */
+/**
+ * Migrate storage keys for multiple wallets to encrypted format.
+ * This is called when encryption key becomes available to migrate all known wallets' keys.
+ * 
+ * @param publicKeys - Array of public keys (as strings) to migrate
+ * @param storage - The cache storage adapter
+ * @param encryptionKey - The encryption key for encrypting storage keys
+ */
+export async function migrateMultipleWalletsKeys(
+    publicKeys: string[],
+    storage: CacheStorage,
+    encryptionKey: string
+): Promise<void> {
+    if (!encryptionKey || publicKeys.length === 0) {
+        return;
+    }
+    
+    console.log(`🔄 [MIGRATION] Migrating keys for ${publicKeys.length} wallets to encrypted format...`);
+    
+    let totalMigrated = 0;
+    for (const publicKeyStr of publicKeys) {
+        try {
+            const publicKey = new PublicKey(publicKeyStr);
+            await migrateStorageKeys(publicKey, storage, encryptionKey);
+            totalMigrated++;
+        } catch (error) {
+            console.error(`❌ [MIGRATION] Error migrating keys for wallet ${publicKeyStr.slice(0, 8)}...:`, error);
+        }
+    }
+    
+    console.log(`✅ [MIGRATION] Completed migration for ${totalMigrated}/${publicKeys.length} wallets`);
+}
+
 export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheStorage, encryptionKey?: string | null): Promise<void> {
     // CRITICAL: Write a marker to storage to verify this function is executing
     // Use storage adapter (consistent with SDK pattern) but also try chrome.storage directly
