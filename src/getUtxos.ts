@@ -120,8 +120,8 @@ export async function localstorageKey(key: PublicKey, encryptionKey?: string | n
         // Fall back to hashing for backward compatibility
         console.log(`🔑 [localstorageKey] No encryption key, using hash`);
         console.error(`🔑 [localstorageKey ERROR CHANNEL] Using hash`);
-        const hashedKey = await hashPublicKey(key);
-        return contractPrefix + hashedKey;
+    const hashedKey = await hashPublicKey(key);
+    return contractPrefix + hashedKey;
     }
 }
 
@@ -167,22 +167,36 @@ export async function migrateMultipleWalletsKeys(
     encryptionKey: string
 ): Promise<void> {
     if (!encryptionKey || publicKeys.length === 0) {
+        logger.warn(`⚠️ [MIGRATION] Skipping migration - encryption key: ${!!encryptionKey}, wallets: ${publicKeys.length}`);
         return;
     }
     
-    for (const publicKeyStr of publicKeys) {
+    logger.info(`🔄 [MIGRATION] Starting migration for ${publicKeys.length} wallets...`);
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (let i = 0; i < publicKeys.length; i++) {
+        const publicKeyStr = publicKeys[i];
         try {
+            logger.info(`🔄 [MIGRATION] Processing wallet ${publicKeyStr.slice(0, 8)}... (${i + 1}/${publicKeys.length})`);
             const publicKey = new PublicKey(publicKeyStr);
             await migrateStorageKeys(publicKey, storage, encryptionKey);
+            successCount++;
+            logger.info(`✅ [MIGRATION] Successfully migrated wallet ${publicKeyStr.slice(0, 8)}...`);
         } catch (error) {
+            failCount++;
             logger.error(`❌ [MIGRATION] Error migrating keys for wallet ${publicKeyStr.slice(0, 8)}...: ${error}`);
         }
     }
+    
+    logger.info(`📊 [MIGRATION] Migration complete: ${successCount} succeeded, ${failCount} failed out of ${publicKeys.length} wallets`);
 }
 
 export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheStorage, encryptionKey?: string | null): Promise<void> {
+    const publicKeyStr = publicKey.toString();
+    
     if (!encryptionKey) {
-        logger.info(`⚠️ [MIGRATION] No session key available - skipping migration`);
+        logger.warn(`⚠️ [MIGRATION] No session key available for wallet ${publicKeyStr.slice(0, 8)}... - skipping migration`);
         return;
     }
     
@@ -194,17 +208,21 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
     try {
         newKeySuffix = await localstorageKey(publicKey, encryptionKey); // Encrypted format
     } catch (error) {
-        logger.error(`❌ [MIGRATION] Error encrypting storage key: ${error}`);
+        logger.error(`❌ [MIGRATION] Error encrypting storage key for wallet ${publicKeyStr.slice(0, 8)}...: ${error}`);
         return;
     }
     
     const willEncrypt = hashedKeySuffix !== newKeySuffix;
     if (!willEncrypt) {
-        logger.warn(`⚠️ [MIGRATION] Encryption key provided but suffixes match - encryption may not be working`);
+        logger.warn(`⚠️ [MIGRATION] Encryption key provided but suffixes match for wallet ${publicKeyStr.slice(0, 8)}... - encryption may not be working`);
+        logger.warn(`   Hashed suffix: ${hashedKeySuffix.slice(0, 40)}...`);
+        logger.warn(`   Encrypted suffix: ${newKeySuffix.slice(0, 40)}...`);
         return;
     }
     
-    logger.info(`🔄 [MIGRATION] Starting storage key migration for wallet ${publicKey.toString().slice(0, 8)}...`);
+    logger.info(`🔄 [MIGRATION] Starting storage key migration for wallet ${publicKeyStr.slice(0, 8)}...`);
+    logger.info(`   Hashed suffix: ${hashedKeySuffix.slice(0, 50)}...`);
+    logger.info(`   Encrypted suffix: ${newKeySuffix.slice(0, 50)}...`);
     
     // Keys to migrate
     const keysToMigrate = [
@@ -380,6 +398,8 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
             // Check both cache and Chrome storage directly for hashed keys
             let hashedValue = storage.getItem(hashedKey);
             
+            logger.info(`🔍 [MIGRATION] Checking for hashed key: ${hashedKey.slice(0, 60)}... (cache: ${hashedValue !== null ? 'FOUND' : 'NOT FOUND'})`);
+            
             // If not in cache, check Chrome storage directly
             if (hashedValue === null && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
                 try {
@@ -393,8 +413,9 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                         });
                     });
                     hashedValue = chromeStorageData[hashedKey] || null;
+                    logger.info(`🔍 [MIGRATION] Chrome storage check for ${name}: ${hashedValue !== null ? 'FOUND' : 'NOT FOUND'}`);
                 } catch (e) {
-                    // Ignore errors - will try cache only
+                    logger.warn(`⚠️ [MIGRATION] Error checking Chrome storage for ${name}: ${e}`);
                 }
             }
             
@@ -521,7 +542,11 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                 
                 // Mark hashed key for deletion after successful migration
                 oldKeysToDelete.push(hashedKey);
+            } else {
+                logger.info(`ℹ️ [MIGRATION] Hashed key ${hashedKey.slice(0, 50)}... does not exist for ${name} - skipping`);
             }
+        } else {
+            logger.info(`ℹ️ [MIGRATION] Migration not needed for ${name} (encryption not working or not enabled)`);
         }
     }
     
