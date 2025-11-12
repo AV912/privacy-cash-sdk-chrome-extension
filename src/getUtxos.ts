@@ -294,7 +294,7 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
         const newKey = prefix + newKeySuffix;
         
         // CRITICAL: Migrate from hashed to encrypted if encryption key is provided AND suffixes differ
-        // If suffixes match, encryption isn't working, so we can't migrate
+        // If suffixes match, encryption isn't working, so we can't migrate (would copy to same key)
         const suffixesDiffer = hashedKeySuffix !== newKeySuffix;
         const needsMigration = !!encryptionKey && suffixesDiffer;
         
@@ -306,6 +306,8 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
             if (!suffixesDiffer) {
                 console.warn(`⚠️ [MIGRATION] Encryption key provided but suffixes match - encryption may not be working for key ${name}`);
                 console.error(`⚠️ [MIGRATION ERROR CHANNEL] Encryption key provided but suffixes match - encryption may not be working`);
+                console.warn(`⚠️ [MIGRATION] Will still attempt migration, but keys may remain in hashed format`);
+                console.error(`⚠️ [MIGRATION ERROR CHANNEL] Will still attempt migration despite encryption failure`);
             }
         }
         
