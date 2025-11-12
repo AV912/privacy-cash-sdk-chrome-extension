@@ -24,17 +24,39 @@ export async function encryptStorageKeyName(
   encryptionKey: string
 ): Promise<string> {
   try {
+    console.log(`🔐 [ENCRYPT] Starting encryption for public key: ${publicKeyString.slice(0, 8)}...`);
+    console.log(`🔐 [ENCRYPT] Encryption key length: ${encryptionKey.length}, preview: ${encryptionKey.slice(0, 20)}...`);
+    console.error(`🔐 [ENCRYPT ERROR CHANNEL] Starting encryption`);
+    
     // Decode the encryption key from base64
-    const keyBytes = Uint8Array.from(atob(encryptionKey), c => c.charCodeAt(0));
+    let keyBytes: Uint8Array;
+    try {
+      keyBytes = Uint8Array.from(atob(encryptionKey), c => c.charCodeAt(0));
+      console.log(`🔐 [ENCRYPT] Decoded key bytes length: ${keyBytes.length}`);
+      console.error(`🔐 [ENCRYPT ERROR CHANNEL] Decoded key bytes length: ${keyBytes.length}`);
+    } catch (e) {
+      console.error(`❌ [ENCRYPT] Failed to decode base64 key:`, e);
+      console.error(`❌ [ENCRYPT ERROR CHANNEL] Base64 decode failed: ${e}`);
+      throw new Error(`Invalid base64 encryption key: ${e}`);
+    }
     
     // Import the encryption key
-    const cryptoKey = await crypto.subtle.importKey(
-      'raw',
-      keyBytes,
-      { name: 'AES-GCM' },
-      false,
-      ['encrypt']
-    );
+    let cryptoKey: CryptoKey;
+    try {
+      cryptoKey = await crypto.subtle.importKey(
+        'raw',
+        keyBytes,
+        { name: 'AES-GCM' },
+        false,
+        ['encrypt']
+      );
+      console.log(`🔐 [ENCRYPT] Successfully imported crypto key`);
+      console.error(`🔐 [ENCRYPT ERROR CHANNEL] Crypto key imported`);
+    } catch (e) {
+      console.error(`❌ [ENCRYPT] Failed to import crypto key:`, e);
+      console.error(`❌ [ENCRYPT ERROR CHANNEL] Crypto key import failed: ${e}`);
+      throw new Error(`Failed to import encryption key: ${e}`);
+    }
     
     // Derive deterministic IV from public key (first 12 bytes of SHA256 hash)
     // This ensures same public key + encryption key = same encrypted key name
@@ -45,14 +67,23 @@ export async function encryptStorageKeyName(
     
     // Encrypt the public key string
     const dataToEncrypt = new TextEncoder().encode(publicKeyString);
-    const encryptedBuffer = await crypto.subtle.encrypt(
-      {
-        name: 'AES-GCM',
-        iv: iv,
-      },
-      cryptoKey,
-      dataToEncrypt
-    );
+    let encryptedBuffer: ArrayBuffer;
+    try {
+      encryptedBuffer = await crypto.subtle.encrypt(
+        {
+          name: 'AES-GCM',
+          iv: iv,
+        },
+        cryptoKey,
+        dataToEncrypt
+      );
+      console.log(`🔐 [ENCRYPT] Successfully encrypted data, length: ${encryptedBuffer.byteLength}`);
+      console.error(`🔐 [ENCRYPT ERROR CHANNEL] Encryption successful`);
+    } catch (e) {
+      console.error(`❌ [ENCRYPT] Failed to encrypt data:`, e);
+      console.error(`❌ [ENCRYPT ERROR CHANNEL] Encryption failed: ${e}`);
+      throw new Error(`Failed to encrypt data: ${e}`);
+    }
     
     // Prepend IV to encrypted data: [IV(12 bytes)][Encrypted Data]
     // This allows decryption without needing to know the public key first
@@ -65,10 +96,14 @@ export async function encryptStorageKeyName(
     const base64 = btoa(String.fromCharCode(...combinedArray));
     const base64url = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
     
+    console.log(`🔐 [ENCRYPT] Encryption complete, result length: ${base64url.length}, preview: ${base64url.slice(0, 30)}...`);
+    console.error(`🔐 [ENCRYPT ERROR CHANNEL] Encryption complete`);
+    
     return base64url;
   } catch (error) {
-    console.error('Storage key encryption error:', error);
-    throw new Error('Failed to encrypt storage key name');
+    console.error('❌ [ENCRYPT] Storage key encryption error:', error);
+    console.error(`❌ [ENCRYPT ERROR CHANNEL] Encryption error: ${error}`);
+    throw new Error(`Failed to encrypt storage key name: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

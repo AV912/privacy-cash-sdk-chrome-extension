@@ -88,18 +88,38 @@ export async function localstorageKey(key: PublicKey, encryptionKey?: string | n
     const contractPrefix = PROGRAM_ID.toString().substring(0, 6);
     const keyString = key.toString();
     
+    console.log(`🔑 [localstorageKey] Called with encryptionKey: ${!!encryptionKey ? 'YES' : 'NO'}, type: ${typeof encryptionKey}, length: ${encryptionKey ? encryptionKey.length : 0}`);
+    console.error(`🔑 [localstorageKey ERROR CHANNEL] encryptionKey: ${!!encryptionKey ? 'YES' : 'NO'}`);
+    
     if (encryptionKey) {
         // Use encryption if encryption key is available
         const cacheKey = `${keyString}:${encryptionKey}`;
         if (publicKeyEncryptionCache.has(cacheKey)) {
-            return contractPrefix + publicKeyEncryptionCache.get(cacheKey)!;
+            const cached = publicKeyEncryptionCache.get(cacheKey)!;
+            console.log(`🔑 [localstorageKey] Using cached encrypted key, length: ${cached.length}`);
+            console.error(`🔑 [localstorageKey ERROR CHANNEL] Using cached encrypted key`);
+            return contractPrefix + cached;
         }
         
-        const encryptedKey = await encryptStorageKeyName(keyString, encryptionKey);
-        publicKeyEncryptionCache.set(cacheKey, encryptedKey);
-        return contractPrefix + encryptedKey;
+        console.log(`🔑 [localstorageKey] Calling encryptStorageKeyName...`);
+        console.error(`🔑 [localstorageKey ERROR CHANNEL] Calling encryptStorageKeyName`);
+        let encryptedKey: string;
+        try {
+            encryptedKey = await encryptStorageKeyName(keyString, encryptionKey);
+            console.log(`🔑 [localstorageKey] encryptStorageKeyName returned, length: ${encryptedKey.length}, preview: ${encryptedKey.slice(0, 30)}...`);
+            console.error(`🔑 [localstorageKey ERROR CHANNEL] encryptStorageKeyName returned`);
+            publicKeyEncryptionCache.set(cacheKey, encryptedKey);
+            return contractPrefix + encryptedKey;
+        } catch (error) {
+            console.error(`❌ [localstorageKey] encryptStorageKeyName failed:`, error);
+            console.error(`❌ [localstorageKey ERROR CHANNEL] Encryption failed: ${error}`);
+            // Don't fall back - throw the error so caller knows encryption failed
+            throw error;
+        }
     } else {
         // Fall back to hashing for backward compatibility
+        console.log(`🔑 [localstorageKey] No encryption key, using hash`);
+        console.error(`🔑 [localstorageKey ERROR CHANNEL] Using hash`);
         const hashedKey = await hashPublicKey(key);
         return contractPrefix + hashedKey;
     }
@@ -200,11 +220,23 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
     
     const oldKeySuffix = localstorageKeyOld(publicKey);
     const hashedKeySuffix = await localstorageKey(publicKey, null); // Hashed format (no encryption key)
-    const newKeySuffix = await localstorageKey(publicKey, encryptionKey); // Encrypted or hashed depending on encryption key
+    
+    // CRITICAL: Try to encrypt and catch any errors
+    let newKeySuffix: string;
+    let encryptionError: Error | null = null;
+    try {
+        newKeySuffix = await localstorageKey(publicKey, encryptionKey); // Encrypted or hashed depending on encryption key
+    } catch (error) {
+        encryptionError = error instanceof Error ? error : new Error(String(error));
+        console.error('❌ [MIGRATION] Error calling localstorageKey with encryption key:', error);
+        console.error(`❌ [MIGRATION ERROR CHANNEL] Encryption failed: ${encryptionError.message}`);
+        // Fall back to hashed if encryption fails
+        newKeySuffix = hashedKeySuffix;
+    }
     
     // Log migration start - use console.log directly to ensure visibility
     const hasEncryptionKey = !!encryptionKey;
-    const willEncrypt = hasEncryptionKey && hashedKeySuffix !== newKeySuffix;
+    const willEncrypt = hasEncryptionKey && hashedKeySuffix !== newKeySuffix && !encryptionError;
     const suffixesMatch = hashedKeySuffix === newKeySuffix;
     
     // CRITICAL DEBUG: Log full key details
@@ -212,11 +244,13 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
     console.log(`  Encryption key provided: ${hasEncryptionKey ? 'YES' : 'NO'}`);
     console.log(`  Encryption key type: ${typeof encryptionKey}`);
     console.log(`  Encryption key length: ${encryptionKey ? encryptionKey.length : 0}`);
+    console.log(`  Encryption key preview: ${encryptionKey ? encryptionKey.slice(0, 20) + '...' : 'N/A'}`);
     console.log(`  Hashed suffix (full): ${hashedKeySuffix}`);
     console.log(`  New suffix (full): ${newKeySuffix}`);
     console.log(`  Suffixes match: ${suffixesMatch}`);
+    console.log(`  Encryption error: ${encryptionError ? encryptionError.message : 'NONE'}`);
     console.log(`  Will encrypt: ${willEncrypt}`);
-    console.error(`🔍 [MIGRATION DEBUG ERROR CHANNEL] Encryption key: ${hasEncryptionKey ? 'YES' : 'NO'}, Suffixes match: ${suffixesMatch}, Will encrypt: ${willEncrypt}`);
+    console.error(`🔍 [MIGRATION DEBUG ERROR CHANNEL] Encryption key: ${hasEncryptionKey ? 'YES' : 'NO'}, Suffixes match: ${suffixesMatch}, Will encrypt: ${willEncrypt}, Error: ${encryptionError ? encryptionError.message : 'NONE'}`);
     
     const logMsg1 = `🔄 [MIGRATION] Starting storage key migration for wallet ${publicKey.toString().slice(0, 8)}...`;
     const logMsg2 = `🔐 [MIGRATION] Encryption key available: ${hasEncryptionKey ? 'YES' : 'NO'} (will ${willEncrypt ? 'encrypt' : 'hash'} keys)`;
