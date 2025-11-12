@@ -233,17 +233,72 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
         const needsMigration = encryptionKey && hashedKeySuffix !== newKeySuffix;
         
         // First, migrate from old format (unhashed) if it exists
-        const oldValue = storage.getItem(oldKey);
+        // Check both cache and Chrome storage directly
+        let oldValue = storage.getItem(oldKey);
+        
+        // If not in cache, check Chrome storage directly
+        if (oldValue === null && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            try {
+                const chromeStorageData = await new Promise<{ [key: string]: any }>((resolve, reject) => {
+                    chrome.storage.local.get(oldKey, (result) => {
+                        if (chrome.runtime.lastError) {
+                            reject(chrome.runtime.lastError);
+                        } else {
+                            resolve(result);
+                        }
+                    });
+                });
+                oldValue = chromeStorageData[oldKey] || null;
+            } catch (e) {
+                // Ignore errors - will try cache only
+            }
+        }
+        
         if (oldValue !== null) {
             const msg = `🔄 [MIGRATION] Found old-format ${name} key (contains unhashed public key)`;
             console.info(msg);
             logger.info(msg);
             
-            // Check if new key already exists (partial migration)
-            const newValue = storage.getItem(newKey);
+            // Check if new key already exists (partial migration) - check both cache and Chrome storage
+            let newValue = storage.getItem(newKey);
+            if (newValue === null && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                try {
+                    const chromeStorageData = await new Promise<{ [key: string]: any }>((resolve, reject) => {
+                        chrome.storage.local.get(newKey, (result) => {
+                            if (chrome.runtime.lastError) {
+                                reject(chrome.runtime.lastError);
+                            } else {
+                                resolve(result);
+                            }
+                        });
+                    });
+                    newValue = chromeStorageData[newKey] || null;
+                } catch (e) {
+                    // Ignore errors
+                }
+            }
+            
             if (newValue === null) {
-                // Write to new key
+                // Write to new key (both cache and Chrome storage)
                 storage.setItem(newKey, oldValue);
+                
+                // Also write directly to Chrome storage to ensure persistence
+                if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                    try {
+                        await new Promise<void>((resolve, reject) => {
+                            chrome.storage.local.set({ [newKey]: oldValue }, () => {
+                                if (chrome.runtime.lastError) {
+                                    reject(chrome.runtime.lastError);
+                                } else {
+                                    resolve();
+                                }
+                            });
+                        });
+                    } catch (e) {
+                        // Ignore errors - cache write should be enough
+                    }
+                }
+                
                 const msg = `✅ [MIGRATION] Migrated ${name} from old format → ${willEncrypt ? 'encrypted' : 'hashed'} format`;
                 console.info(msg);
                 logger.info(msg);
@@ -260,14 +315,35 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                             : newValue.split(',').map(n => Number(n));
                         
                         // Merge and deduplicate
+                        let mergedValue: string;
                         if (name === 'encrypted_outputs') {
                             const merged = [...new Set([...oldData, ...newData])];
-                            storage.setItem(newKey, JSON.stringify(merged));
+                            mergedValue = JSON.stringify(merged);
+                            storage.setItem(newKey, mergedValue);
                         } else {
                             const merged = [...new Set([...oldData, ...newData])];
                             const top20 = merged.sort((a, b) => b - a).slice(0, 20);
-                            storage.setItem(newKey, top20.join(','));
+                            mergedValue = top20.join(',');
+                            storage.setItem(newKey, mergedValue);
                         }
+                        
+                        // Also write directly to Chrome storage to ensure persistence
+                        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                            try {
+                                await new Promise<void>((resolve, reject) => {
+                                    chrome.storage.local.set({ [newKey]: mergedValue }, () => {
+                                        if (chrome.runtime.lastError) {
+                                            reject(chrome.runtime.lastError);
+                                        } else {
+                                            resolve();
+                                        }
+                                    });
+                                });
+                            } catch (e) {
+                                // Ignore errors - cache write should be enough
+                            }
+                        }
+                        
                         logger.info(`✅ [MIGRATION] Merged ${name} data from old and new keys`);
                         migratedFromOld++;
                     } catch (e) {
@@ -279,6 +355,24 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                     const newNum = Number(newValue);
                     if (oldNum > newNum) {
                         storage.setItem(newKey, oldValue);
+                        
+                        // Also write directly to Chrome storage to ensure persistence
+                        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                            try {
+                                await new Promise<void>((resolve, reject) => {
+                                    chrome.storage.local.set({ [newKey]: oldValue }, () => {
+                                        if (chrome.runtime.lastError) {
+                                            reject(chrome.runtime.lastError);
+                                        } else {
+                                            resolve();
+                                        }
+                                    });
+                                });
+                            } catch (e) {
+                                // Ignore errors - cache write should be enough
+                            }
+                        }
+                        
                         logger.info(`✅ [MIGRATION] Updated ${name} with larger value from old key`);
                         migratedFromOld++;
                     }
@@ -294,17 +388,73 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
         
         // Second, migrate from hashed format to encrypted format if encryption key is available
         if (needsMigration) {
-            const hashedValue = storage.getItem(hashedKey);
+            // Check both cache and Chrome storage directly for hashed keys
+            // (hashed keys might only exist in Chrome storage, not in cache)
+            let hashedValue = storage.getItem(hashedKey);
+            
+            // If not in cache, check Chrome storage directly
+            if (hashedValue === null && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                try {
+                    const chromeStorageData = await new Promise<{ [key: string]: any }>((resolve, reject) => {
+                        chrome.storage.local.get(hashedKey, (result) => {
+                            if (chrome.runtime.lastError) {
+                                reject(chrome.runtime.lastError);
+                            } else {
+                                resolve(result);
+                            }
+                        });
+                    });
+                    hashedValue = chromeStorageData[hashedKey] || null;
+                } catch (e) {
+                    // Ignore errors - will try cache only
+                }
+            }
+            
             if (hashedValue !== null) {
                 const msg = `🔄 [MIGRATION] Found hashed-format ${name} key (migrating to encrypted format)`;
                 console.info(msg);
                 logger.info(msg);
                 
-                // Check if encrypted key already exists
-                const encryptedValue = storage.getItem(newKey);
+                // Check if encrypted key already exists (check both cache and Chrome storage)
+                let encryptedValue = storage.getItem(newKey);
+                if (encryptedValue === null && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                    try {
+                        const chromeStorageData = await new Promise<{ [key: string]: any }>((resolve, reject) => {
+                            chrome.storage.local.get(newKey, (result) => {
+                                if (chrome.runtime.lastError) {
+                                    reject(chrome.runtime.lastError);
+                                } else {
+                                    resolve(result);
+                                }
+                            });
+                        });
+                        encryptedValue = chromeStorageData[newKey] || null;
+                    } catch (e) {
+                        // Ignore errors
+                    }
+                }
+                
                 if (encryptedValue === null) {
-                    // Write to encrypted key
+                    // Write to encrypted key (both cache and Chrome storage)
                     storage.setItem(newKey, hashedValue);
+                    
+                    // Also write directly to Chrome storage to ensure persistence
+                    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                        try {
+                            await new Promise<void>((resolve, reject) => {
+                                chrome.storage.local.set({ [newKey]: hashedValue }, () => {
+                                    if (chrome.runtime.lastError) {
+                                        reject(chrome.runtime.lastError);
+                                    } else {
+                                        resolve();
+                                    }
+                                });
+                            });
+                        } catch (e) {
+                            // Ignore errors - cache write should be enough
+                        }
+                    }
+                    
                     const msg = `✅ [MIGRATION] Migrated ${name} from hashed → encrypted format`;
                     console.info(msg);
                     logger.info(msg);
@@ -321,14 +471,35 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                                 : encryptedValue.split(',').map(n => Number(n));
                             
                             // Merge and deduplicate
+                            let mergedValue: string;
                             if (name === 'encrypted_outputs') {
                                 const merged = [...new Set([...hashedData, ...encryptedData])];
-                                storage.setItem(newKey, JSON.stringify(merged));
+                                mergedValue = JSON.stringify(merged);
+                                storage.setItem(newKey, mergedValue);
                             } else {
                                 const merged = [...new Set([...hashedData, ...encryptedData])];
                                 const top20 = merged.sort((a, b) => b - a).slice(0, 20);
-                                storage.setItem(newKey, top20.join(','));
+                                mergedValue = top20.join(',');
+                                storage.setItem(newKey, mergedValue);
                             }
+                            
+                            // Also write directly to Chrome storage to ensure persistence
+                            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                                try {
+                                    await new Promise<void>((resolve, reject) => {
+                                        chrome.storage.local.set({ [newKey]: mergedValue }, () => {
+                                            if (chrome.runtime.lastError) {
+                                                reject(chrome.runtime.lastError);
+                                            } else {
+                                                resolve();
+                                            }
+                                        });
+                                    });
+                                } catch (e) {
+                                    // Ignore errors - cache write should be enough
+                                }
+                            }
+                            
                             logger.info(`✅ [MIGRATION] Merged ${name} data from hashed and encrypted keys`);
                             migratedFromHashed++;
                         } catch (e) {
@@ -340,6 +511,24 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                         const encryptedNum = Number(encryptedValue);
                         if (hashedNum > encryptedNum) {
                             storage.setItem(newKey, hashedValue);
+                            
+                            // Also write directly to Chrome storage to ensure persistence
+                            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                                try {
+                                    await new Promise<void>((resolve, reject) => {
+                                        chrome.storage.local.set({ [newKey]: hashedValue }, () => {
+                                            if (chrome.runtime.lastError) {
+                                                reject(chrome.runtime.lastError);
+                                            } else {
+                                                resolve();
+                                            }
+                                        });
+                                    });
+                                } catch (e) {
+                                    // Ignore errors - cache write should be enough
+                                }
+                            }
+                            
                             logger.info(`✅ [MIGRATION] Updated ${name} with larger value from hashed key`);
                             migratedFromHashed++;
                         }
