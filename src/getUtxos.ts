@@ -376,6 +376,28 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
     console.log(`🔍 [SDK] Encryption key: ${storageKeyEncryptionKey ? 'YES' : 'NO'}`);
     console.error(`🔍 [SDK ERROR CHANNEL] getUtxos() called - this is a test log`);
     
+    // Check if encryption key is NOW available but keys might still be hashed
+    // If so, clear cache to force re-migration with encryption
+    if (storageKeyEncryptionKey && getMyUtxosPromise) {
+        const hashedKeySuffix = await localstorageKey(publicKey, null);
+        const encryptedKeySuffix = await localstorageKey(publicKey, storageKeyEncryptionKey);
+        
+        // If encrypted key is different from hashed key, we need to migrate
+        if (hashedKeySuffix !== encryptedKeySuffix) {
+            // Check if we have hashed keys but not encrypted keys
+            const hashedKey = LSK_ENCRYPTED_OUTPUTS + hashedKeySuffix;
+            const encryptedKey = LSK_ENCRYPTED_OUTPUTS + encryptedKeySuffix;
+            const hasHashedData = storage.getItem(hashedKey) !== null;
+            const hasEncryptedData = storage.getItem(encryptedKey) !== null;
+            
+            if (hasHashedData && !hasEncryptedData) {
+                console.log('%c🔄 [SDK] Encryption key now available - clearing cache to re-migrate with encryption', 'color: orange; font-size: 14px; font-weight: bold;');
+                console.error('🔄 [SDK ERROR CHANNEL] Encryption key now available - clearing cache to re-migrate');
+                getMyUtxosPromise = null; // Clear cache to force re-migration
+            }
+        }
+    }
+    
     if (!getMyUtxosPromise) {
         console.log('%c🔍 [SDK] Creating NEW promise - migration WILL RUN', 'color: green; font-size: 14px; font-weight: bold;');
         console.error(`🔍 [SDK ERROR CHANNEL] Creating new promise - migration will run`);
