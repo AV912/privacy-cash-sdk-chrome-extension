@@ -166,116 +166,45 @@ export async function migrateMultipleWalletsKeys(
     storage: CacheStorage,
     encryptionKey: string
 ): Promise<void> {
-    console.log(`🔄 [MIGRATION] migrateMultipleWalletsKeys called with ${publicKeys.length} wallets`);
-    console.log(`🔐 [MIGRATION] Encryption key provided: ${!!encryptionKey}, Type: ${typeof encryptionKey}, Length: ${encryptionKey ? encryptionKey.length : 0}`);
-    console.error(`🔄 [MIGRATION ERROR CHANNEL] migrateMultipleWalletsKeys called with ${publicKeys.length} wallets`);
-    console.error(`🔐 [MIGRATION ERROR CHANNEL] Encryption key provided: ${!!encryptionKey}`);
-    
     if (!encryptionKey || publicKeys.length === 0) {
-        console.warn(`⚠️ [MIGRATION] Skipping migration - encryption key: ${!!encryptionKey}, wallets: ${publicKeys.length}`);
-        console.error(`⚠️ [MIGRATION ERROR CHANNEL] Skipping migration - encryption key: ${!!encryptionKey}, wallets: ${publicKeys.length}`);
         return;
     }
     
-    console.log(`🔄 [MIGRATION] Migrating keys for ${publicKeys.length} wallets to encrypted format...`);
-    console.error(`🔄 [MIGRATION ERROR CHANNEL] Migrating keys for ${publicKeys.length} wallets`);
-    
-    let totalMigrated = 0;
     for (const publicKeyStr of publicKeys) {
         try {
-            console.log(`🔄 [MIGRATION] Processing wallet ${publicKeyStr.slice(0, 8)}... (${totalMigrated + 1}/${publicKeys.length})`);
-            console.error(`🔄 [MIGRATION ERROR CHANNEL] Processing wallet ${publicKeyStr.slice(0, 8)}...`);
             const publicKey = new PublicKey(publicKeyStr);
             await migrateStorageKeys(publicKey, storage, encryptionKey);
-            totalMigrated++;
-            console.log(`✅ [MIGRATION] Successfully migrated wallet ${publicKeyStr.slice(0, 8)}...`);
         } catch (error) {
-            console.error(`❌ [MIGRATION] Error migrating keys for wallet ${publicKeyStr.slice(0, 8)}...:`, error);
-            console.error(`❌ [MIGRATION ERROR CHANNEL] Error migrating wallet ${publicKeyStr.slice(0, 8)}...:`, error);
+            logger.error(`❌ [MIGRATION] Error migrating keys for wallet ${publicKeyStr.slice(0, 8)}...: ${error}`);
         }
     }
-    
-    console.log(`✅ [MIGRATION] Completed migration for ${totalMigrated}/${publicKeys.length} wallets`);
-    console.error(`✅ [MIGRATION ERROR CHANNEL] Completed migration for ${totalMigrated}/${publicKeys.length} wallets`);
 }
 
 export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheStorage, encryptionKey?: string | null): Promise<void> {
-    // CRITICAL: Write a marker to storage to verify this function is executing
-    // Use storage adapter (consistent with SDK pattern) but also try chrome.storage directly
-    try {
-        const testMarker = `Migration executed at ${Date.now()} for wallet ${publicKey.toString().slice(0, 8)}`;
-        storage.setItem('SDK_MIGRATION_TEST', testMarker);
-        
-        // Also write directly to chrome.storage as backup (for verification)
-        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-            await new Promise<void>((resolve) => {
-                chrome.storage.local.set({ 
-                    'SDK_MIGRATION_TEST_DIRECT': testMarker
-                }, () => resolve());
-            });
-        }
-    } catch (e) {
-        // Ignore errors - marker is just for debugging
+    if (!encryptionKey) {
+        logger.info(`⚠️ [MIGRATION] No session key available - skipping migration`);
+        return;
     }
     
     const oldKeySuffix = localstorageKeyOld(publicKey);
     const hashedKeySuffix = await localstorageKey(publicKey, null); // Hashed format (no encryption key)
     
-    // CRITICAL: Try to encrypt and catch any errors
+    // Try to encrypt and catch any errors
     let newKeySuffix: string;
-    let encryptionError: Error | null = null;
     try {
-        newKeySuffix = await localstorageKey(publicKey, encryptionKey); // Encrypted or hashed depending on encryption key
+        newKeySuffix = await localstorageKey(publicKey, encryptionKey); // Encrypted format
     } catch (error) {
-        encryptionError = error instanceof Error ? error : new Error(String(error));
-        console.error('❌ [MIGRATION] Error calling localstorageKey with encryption key:', error);
-        console.error(`❌ [MIGRATION ERROR CHANNEL] Encryption failed: ${encryptionError.message}`);
-        // Fall back to hashed if encryption fails
-        newKeySuffix = hashedKeySuffix;
+        logger.error(`❌ [MIGRATION] Error encrypting storage key: ${error}`);
+        return;
     }
     
-    // Log migration start - use console.log directly to ensure visibility
-    const hasEncryptionKey = !!encryptionKey;
-    const willEncrypt = hasEncryptionKey && hashedKeySuffix !== newKeySuffix && !encryptionError;
-    const suffixesMatch = hashedKeySuffix === newKeySuffix;
-    
-    // CRITICAL DEBUG: Log full key details
-    console.log('%c🔍 [MIGRATION DEBUG] Full key comparison:', 'color: red; font-size: 14px; font-weight: bold;');
-    console.log(`  Encryption key provided: ${hasEncryptionKey ? 'YES' : 'NO'}`);
-    console.log(`  Encryption key type: ${typeof encryptionKey}`);
-    console.log(`  Encryption key length: ${encryptionKey ? encryptionKey.length : 0}`);
-    console.log(`  Encryption key preview: ${encryptionKey ? encryptionKey.slice(0, 20) + '...' : 'N/A'}`);
-    console.log(`  Hashed suffix (full): ${hashedKeySuffix}`);
-    console.log(`  New suffix (full): ${newKeySuffix}`);
-    console.log(`  Suffixes match: ${suffixesMatch}`);
-    console.log(`  Encryption error: ${encryptionError ? encryptionError.message : 'NONE'}`);
-    console.log(`  Will encrypt: ${willEncrypt}`);
-    console.error(`🔍 [MIGRATION DEBUG ERROR CHANNEL] Encryption key: ${hasEncryptionKey ? 'YES' : 'NO'}, Suffixes match: ${suffixesMatch}, Will encrypt: ${willEncrypt}, Error: ${encryptionError ? encryptionError.message : 'NONE'}`);
-    
-    const logMsg1 = `🔄 [MIGRATION] Starting storage key migration for wallet ${publicKey.toString().slice(0, 8)}...`;
-    const logMsg2 = `🔐 [MIGRATION] Encryption key available: ${hasEncryptionKey ? 'YES' : 'NO'} (will ${willEncrypt ? 'encrypt' : 'hash'} keys)`;
-    const logMsg3 = `🔍 [MIGRATION] Key suffixes - Old: ${oldKeySuffix.slice(0, 20)}..., Hashed: ${hashedKeySuffix.slice(0, 20)}..., New: ${newKeySuffix.slice(0, 20)}...`;
-    const logMsg4 = `⚠️ [MIGRATION] Suffixes match: ${suffixesMatch} (this should be FALSE if encryption is working)`;
-    
-    // Use multiple logging methods to ensure visibility
-    console.log('%c' + logMsg1, 'color: purple; font-size: 16px; font-weight: bold;');
-    console.log('%c' + logMsg2, 'color: purple; font-size: 14px; font-weight: bold;');
-    console.log('%c' + logMsg3, 'color: purple; font-size: 12px;');
-    console.log('%c' + logMsg4, 'color: orange; font-size: 14px; font-weight: bold;');
-    console.error(`🔄 [MIGRATION ERROR CHANNEL] ${logMsg1}`);
-    console.error(`🔐 [MIGRATION ERROR CHANNEL] ${logMsg2}`);
-    console.error(`🔍 [MIGRATION ERROR CHANNEL] ${logMsg3}`);
-    console.error(`⚠️ [MIGRATION ERROR CHANNEL] ${logMsg4}`);
-    
-    // Also try window.console if available
-    if (typeof window !== 'undefined' && window.console) {
-        window.console.log('🔄 [MIGRATION WINDOW.CONSOLE]', logMsg1);
+    const willEncrypt = hashedKeySuffix !== newKeySuffix;
+    if (!willEncrypt) {
+        logger.warn(`⚠️ [MIGRATION] Encryption key provided but suffixes match - encryption may not be working`);
+        return;
     }
     
-    logger.info(logMsg1);
-    logger.info(logMsg2);
-    logger.info(logMsg3);
-    logger.info(logMsg4);
+    logger.info(`🔄 [MIGRATION] Starting storage key migration for wallet ${publicKey.toString().slice(0, 8)}...`);
     
     // Keys to migrate
     const keysToMigrate = [
@@ -293,23 +222,8 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
         const hashedKey = prefix + hashedKeySuffix;
         const newKey = prefix + newKeySuffix;
         
-        // CRITICAL: Migrate from hashed to encrypted if encryption key is provided AND suffixes differ
-        // If suffixes match, encryption isn't working, so we can't migrate (would copy to same key)
-        const suffixesDiffer = hashedKeySuffix !== newKeySuffix;
-        const needsMigration = !!encryptionKey && suffixesDiffer;
-        
-        // Debug logging for each key
-        if (encryptionKey) {
-            console.log(`🔍 [MIGRATION] Key: ${name}, Hashed: ${hashedKey.slice(0, 50)}..., New: ${newKey.slice(0, 50)}..., Suffixes differ: ${suffixesDiffer}, Needs migration: ${needsMigration}`);
-            console.error(`🔍 [MIGRATION ERROR CHANNEL] Key: ${name}, Suffixes differ: ${suffixesDiffer}, Needs migration: ${needsMigration}`);
-            
-            if (!suffixesDiffer) {
-                console.warn(`⚠️ [MIGRATION] Encryption key provided but suffixes match - encryption may not be working for key ${name}`);
-                console.error(`⚠️ [MIGRATION ERROR CHANNEL] Encryption key provided but suffixes match - encryption may not be working`);
-                console.warn(`⚠️ [MIGRATION] Will still attempt migration, but keys may remain in hashed format`);
-                console.error(`⚠️ [MIGRATION ERROR CHANNEL] Will still attempt migration despite encryption failure`);
-            }
-        }
+        // Migrate from hashed to encrypted if encryption key is provided AND suffixes differ
+        const needsMigration = willEncrypt;
         
         // First, migrate from old format (unhashed) if it exists
         // Check both cache and Chrome storage directly
@@ -334,9 +248,7 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
         }
         
         if (oldValue !== null) {
-            const msg = `🔄 [MIGRATION] Found old-format ${name} key (contains unhashed public key)`;
-            console.info(msg);
-            logger.info(msg);
+            logger.info(`🔄 [MIGRATION] Found old-format ${name} key (migrating to encrypted format)`);
             
             // Check if new key already exists (partial migration) - check both cache and Chrome storage
             let newValue = storage.getItem(newKey);
@@ -378,9 +290,7 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                     }
                 }
                 
-                const msg = `✅ [MIGRATION] Migrated ${name} from old format → ${willEncrypt ? 'encrypted' : 'hashed'} format`;
-                console.info(msg);
-                logger.info(msg);
+                logger.info(`✅ [MIGRATION] Migrated ${name} from old format → encrypted format`);
                 migratedFromOld++;
             } else {
                 // Merge logic for encrypted_outputs and tradeHistory
@@ -468,18 +378,11 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
         // Second, migrate from hashed format to encrypted format if encryption key is available
         if (needsMigration) {
             // Check both cache and Chrome storage directly for hashed keys
-            // (hashed keys might only exist in Chrome storage, not in cache)
             let hashedValue = storage.getItem(hashedKey);
-            
-            console.log(`🔍 [MIGRATION] Checking for hashed key: ${hashedKey.slice(0, 60)}...`);
-            console.log(`🔍 [MIGRATION] Cache check result: ${hashedValue !== null ? 'FOUND' : 'NOT FOUND'}`);
-            console.error(`🔍 [MIGRATION ERROR CHANNEL] Checking hashed key: ${hashedKey.slice(0, 40)}..., Cache: ${hashedValue !== null ? 'FOUND' : 'NOT FOUND'}`);
             
             // If not in cache, check Chrome storage directly
             if (hashedValue === null && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
                 try {
-                    console.log(`🔍 [MIGRATION] Checking Chrome storage directly for hashed key...`);
-                    console.error(`🔍 [MIGRATION ERROR CHANNEL] Checking Chrome storage for hashed key`);
                     const chromeStorageData = await new Promise<{ [key: string]: any }>((resolve, reject) => {
                         chrome.storage.local.get(hashedKey, (result) => {
                             if (chrome.runtime.lastError) {
@@ -490,40 +393,13 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                         });
                     });
                     hashedValue = chromeStorageData[hashedKey] || null;
-                    console.log(`🔍 [MIGRATION] Chrome storage check result: ${hashedValue !== null ? 'FOUND' : 'NOT FOUND'}`);
-                    console.error(`🔍 [MIGRATION ERROR CHANNEL] Chrome storage: ${hashedValue !== null ? 'FOUND' : 'NOT FOUND'}`);
-                    
-                    // DEBUG: Also check if ANY keys with this prefix exist
-                    if (hashedValue === null) {
-                        console.log(`🔍 [MIGRATION] Hashed key not found, checking for keys with prefix: ${prefix}...`);
-                        console.error(`🔍 [MIGRATION ERROR CHANNEL] Checking for keys with prefix: ${prefix}`);
-                        try {
-                            const allKeys = await new Promise<{ [key: string]: any }>((resolve, reject) => {
-                                chrome.storage.local.get(null, (result) => {
-                                    if (chrome.runtime.lastError) {
-                                        reject(chrome.runtime.lastError);
-                                    } else {
-                                        resolve(result);
-                                    }
-                                });
-                            });
-                            const matchingKeys = Object.keys(allKeys).filter(k => k.startsWith(prefix + '9fhQBb'));
-                            console.log(`🔍 [MIGRATION] Found ${matchingKeys.length} keys with prefix ${prefix}9fhQBb:`, matchingKeys.slice(0, 5).map(k => k.slice(0, 60) + '...'));
-                            console.error(`🔍 [MIGRATION ERROR CHANNEL] Found ${matchingKeys.length} matching keys`);
-                        } catch (e) {
-                            console.error(`❌ [MIGRATION] Error checking all keys:`, e);
-                        }
-                    }
                 } catch (e) {
-                    console.error(`❌ [MIGRATION] Error checking Chrome storage:`, e);
-                    console.error(`❌ [MIGRATION ERROR CHANNEL] Chrome storage check error: ${e}`);
+                    // Ignore errors - will try cache only
                 }
             }
             
             if (hashedValue !== null) {
-                const msg = `🔄 [MIGRATION] Found hashed-format ${name} key (migrating to encrypted format)`;
-                console.info(msg);
-                logger.info(msg);
+                logger.info(`🔄 [MIGRATION] Found hashed-format ${name} key (migrating to encrypted format)`);
                 
                 // Check if encrypted key already exists (check both cache and Chrome storage)
                 let encryptedValue = storage.getItem(newKey);
@@ -565,10 +441,8 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                         }
                     }
                     
-                    const msg = `✅ [MIGRATION] Migrated ${name} from hashed → encrypted format`;
-                    console.info(msg);
-                    logger.info(msg);
-                    migratedFromHashed++;
+                logger.info(`✅ [MIGRATION] Migrated ${name} from hashed → encrypted format`);
+                migratedFromHashed++;
                 } else {
                     // Merge logic for encrypted_outputs and tradeHistory
                     if (name === 'encrypted_outputs' || name === 'tradeHistory') {
@@ -645,7 +519,7 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                     }
                 }
                 
-                // Mark hashed key for deletion
+                // Mark hashed key for deletion after successful migration
                 oldKeysToDelete.push(hashedKey);
             }
         }
@@ -653,17 +527,14 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
     
     // Log migration summary
     const totalMigrated = migratedFromOld + migratedFromHashed;
+    
     if (totalMigrated > 0) {
-        const msg = `📊 [MIGRATION] Migration summary: ${migratedFromOld} keys migrated from old format, ${migratedFromHashed} keys migrated from hashed format`;
-        console.info(msg);
-        logger.info(msg);
+        logger.info(`📊 [MIGRATION] Migration summary: ${migratedFromOld} keys migrated from old format, ${migratedFromHashed} keys migrated from hashed format`);
     } else {
-        const msg = `ℹ️ [MIGRATION] No keys needed migration (all keys already in ${willEncrypt ? 'encrypted' : 'hashed'} format)`;
-        console.info(msg);
-        logger.info(msg);
+        logger.info(`ℹ️ [MIGRATION] No keys needed migration (all keys already in encrypted format)`);
     }
     
-    // Delete old keys from Chrome storage
+    // Delete old keys from Chrome storage (only if we actually migrated them)
     if (oldKeysToDelete.length > 0) {
         try {
             // Delete directly from Chrome storage if available
@@ -681,15 +552,10 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                 // Fallback to adapter method
                 await Promise.all(oldKeysToDelete.map(key => storage.removeItem(key)));
             }
-            const msg = `🗑️ [MIGRATION] Deleted ${oldKeysToDelete.length} old/hashed storage keys from Chrome storage`;
-            console.info(msg);
-            logger.info(msg);
+            logger.info(`🗑️ [MIGRATION] Deleted ${oldKeysToDelete.length} old/hashed storage keys`);
         } catch (err) {
-            logger.info(`⚠️ [MIGRATION] Error deleting old keys: ${err}`);
-            // Continue anyway - keys may still be deleted
+            logger.error(`❌ [MIGRATION] Error deleting old keys: ${err}`);
         }
-    } else {
-        logger.info(`✅ [MIGRATION] Migration completed - no old keys to delete`);
     }
 }
 
@@ -700,54 +566,14 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
     storage: CacheStorage,
     storageKeyEncryptionKey?: string | null
 }): Promise<Utxo[]> {
-    // CRITICAL: Log immediately when function is called (before promise check)
-    // Use console.log and console.error to ensure visibility in browser console
-    console.log('%c🔍 [SDK] getUtxos() CALLED', 'color: red; font-size: 16px; font-weight: bold;');
-    console.log(`🔍 [SDK] Wallet: ${publicKey.toString().slice(0, 8)}...`);
-    console.log(`🔍 [SDK] Promise cache: ${getMyUtxosPromise ? 'EXISTS' : 'NULL'}`);
-    console.log(`🔍 [SDK] Encryption key: ${storageKeyEncryptionKey ? 'YES' : 'NO'}`);
-    console.error(`🔍 [SDK ERROR CHANNEL] getUtxos() called - this is a test log`);
-    
-    // Check if encryption key is NOW available but keys might still be hashed
-    // If so, clear cache to force re-migration with encryption
-    if (storageKeyEncryptionKey && getMyUtxosPromise) {
-        const hashedKeySuffix = await localstorageKey(publicKey, null);
-        const encryptedKeySuffix = await localstorageKey(publicKey, storageKeyEncryptionKey);
-        
-        // If encrypted key is different from hashed key, we need to migrate
-        if (hashedKeySuffix !== encryptedKeySuffix) {
-            // Check if we have hashed keys but not encrypted keys
-            const hashedKey = LSK_ENCRYPTED_OUTPUTS + hashedKeySuffix;
-            const encryptedKey = LSK_ENCRYPTED_OUTPUTS + encryptedKeySuffix;
-            const hasHashedData = storage.getItem(hashedKey) !== null;
-            const hasEncryptedData = storage.getItem(encryptedKey) !== null;
-            
-            if (hasHashedData && !hasEncryptedData) {
-                console.log('%c🔄 [SDK] Encryption key now available - clearing cache to re-migrate with encryption', 'color: orange; font-size: 14px; font-weight: bold;');
-                console.error('🔄 [SDK ERROR CHANNEL] Encryption key now available - clearing cache to re-migrate');
-                getMyUtxosPromise = null; // Clear cache to force re-migration
-            }
-        }
-    }
-    
     if (!getMyUtxosPromise) {
-        console.log('%c🔍 [SDK] Creating NEW promise - migration WILL RUN', 'color: green; font-size: 14px; font-weight: bold;');
-        console.error(`🔍 [SDK ERROR CHANNEL] Creating new promise - migration will run`);
         getMyUtxosPromise = (async () => {
             let valid_utxos: Utxo[] = []
             let valid_strings: string[] = []
             let history_indexes: number[] = []
             try {
-                // Log that we're starting UTXO fetch (which triggers migration) - use console.log directly
-                const utxoLogMsg = `🔄 [UTXO] Starting UTXO fetch for wallet ${publicKey.toString().slice(0, 8)}...`;
-                console.log('%c' + utxoLogMsg, 'color: blue; font-size: 14px; font-weight: bold;');
-                console.error(`🔄 [UTXO ERROR CHANNEL] ${utxoLogMsg}`);
-                logger.info(utxoLogMsg);
-                
-                // Migrate old keys to new format if needed
-                console.log('%c🔄 [MIGRATION] About to call migrateStorageKeys()', 'color: orange; font-size: 14px; font-weight: bold;');
-                await migrateStorageKeys(publicKey, storage, storageKeyEncryptionKey);
-                console.log('%c✅ [MIGRATION] migrateStorageKeys() completed', 'color: green; font-size: 14px; font-weight: bold;');
+                // Migration happens before UTXO operations (during wallet unlock)
+                // No need to migrate here
                 
                 const storageKeySuffix = await localstorageKey(publicKey, storageKeyEncryptionKey);
                 let offsetStr = storage.getItem(LSK_FETCH_OFFSET + storageKeySuffix)
@@ -794,7 +620,6 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
             } catch (e: any) {
                 throw e
             } finally {
-                console.info(`🔍 [SDK] Clearing promise cache`);
                 getMyUtxosPromise = null
             }
             // get history index
@@ -820,9 +645,6 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
             storage.setItem(LSK_ENCRYPTED_OUTPUTS + storageKeySuffix, JSON.stringify(valid_strings))
             return valid_utxos
         })()
-    } else {
-        console.log('%c🔍 [SDK] Using CACHED promise - migration already ran', 'color: yellow; font-size: 14px; font-weight: bold;');
-        console.error(`🔍 [SDK ERROR CHANNEL] Using cached promise - migration already ran`);
     }
     return getMyUtxosPromise
 }
