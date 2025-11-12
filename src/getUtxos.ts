@@ -471,9 +471,15 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
             // (hashed keys might only exist in Chrome storage, not in cache)
             let hashedValue = storage.getItem(hashedKey);
             
+            console.log(`🔍 [MIGRATION] Checking for hashed key: ${hashedKey.slice(0, 60)}...`);
+            console.log(`🔍 [MIGRATION] Cache check result: ${hashedValue !== null ? 'FOUND' : 'NOT FOUND'}`);
+            console.error(`🔍 [MIGRATION ERROR CHANNEL] Checking hashed key: ${hashedKey.slice(0, 40)}..., Cache: ${hashedValue !== null ? 'FOUND' : 'NOT FOUND'}`);
+            
             // If not in cache, check Chrome storage directly
             if (hashedValue === null && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
                 try {
+                    console.log(`🔍 [MIGRATION] Checking Chrome storage directly for hashed key...`);
+                    console.error(`🔍 [MIGRATION ERROR CHANNEL] Checking Chrome storage for hashed key`);
                     const chromeStorageData = await new Promise<{ [key: string]: any }>((resolve, reject) => {
                         chrome.storage.local.get(hashedKey, (result) => {
                             if (chrome.runtime.lastError) {
@@ -484,8 +490,33 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
                         });
                     });
                     hashedValue = chromeStorageData[hashedKey] || null;
+                    console.log(`🔍 [MIGRATION] Chrome storage check result: ${hashedValue !== null ? 'FOUND' : 'NOT FOUND'}`);
+                    console.error(`🔍 [MIGRATION ERROR CHANNEL] Chrome storage: ${hashedValue !== null ? 'FOUND' : 'NOT FOUND'}`);
+                    
+                    // DEBUG: Also check if ANY keys with this prefix exist
+                    if (hashedValue === null) {
+                        console.log(`🔍 [MIGRATION] Hashed key not found, checking for keys with prefix: ${prefix}...`);
+                        console.error(`🔍 [MIGRATION ERROR CHANNEL] Checking for keys with prefix: ${prefix}`);
+                        try {
+                            const allKeys = await new Promise<{ [key: string]: any }>((resolve, reject) => {
+                                chrome.storage.local.get(null, (result) => {
+                                    if (chrome.runtime.lastError) {
+                                        reject(chrome.runtime.lastError);
+                                    } else {
+                                        resolve(result);
+                                    }
+                                });
+                            });
+                            const matchingKeys = Object.keys(allKeys).filter(k => k.startsWith(prefix + '9fhQBb'));
+                            console.log(`🔍 [MIGRATION] Found ${matchingKeys.length} keys with prefix ${prefix}9fhQBb:`, matchingKeys.slice(0, 5).map(k => k.slice(0, 60) + '...'));
+                            console.error(`🔍 [MIGRATION ERROR CHANNEL] Found ${matchingKeys.length} matching keys`);
+                        } catch (e) {
+                            console.error(`❌ [MIGRATION] Error checking all keys:`, e);
+                        }
+                    }
                 } catch (e) {
-                    // Ignore errors - will try cache only
+                    console.error(`❌ [MIGRATION] Error checking Chrome storage:`, e);
+                    console.error(`❌ [MIGRATION ERROR CHANNEL] Chrome storage check error: ${e}`);
                 }
             }
             
