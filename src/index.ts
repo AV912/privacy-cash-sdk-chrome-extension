@@ -1,6 +1,6 @@
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import { deposit } from './deposit.js';
-import { getBalanceFromUtxos, getUtxos, localstorageKey } from './getUtxos.js';
+import { getBalanceFromUtxos, getUtxos, localstorageKey, migrateStorageKeys } from './getUtxos.js';
 
 import { LSK_ENCRYPTED_OUTPUTS, LSK_FETCH_OFFSET, PROGRAM_ID } from './utils/constants.js';
 import { logger, type LoggerFn, setLogger } from './utils/logger.js';
@@ -10,11 +10,14 @@ import bs58 from 'bs58'
 import { withdraw } from './withdraw.js';
 import path from 'node:path'
 
+// Re-export migrateStorageKeys for direct use
+export { migrateStorageKeys } from './getUtxos.js';
+
 // Storage interface for cache persistence
 export interface CacheStorage {
     getItem(key: string): string | null;
     setItem(key: string, value: string): void;
-    removeItem(key: string): void;
+    removeItem(key: string): Promise<void>;
 }
 
 export class PrivacyCash {
@@ -23,13 +26,15 @@ export class PrivacyCash {
     private encryptionService: EncryptionService
     private keypair: Keypair
     private storage: CacheStorage
+    private storageKeyEncryptionKey: string | null = null
     private isRuning?: boolean = false
     private status: string = ''
-    constructor({ RPC_url, owner, storage, enableDebug }: {
+    constructor({ RPC_url, owner, storage, enableDebug, storageKeyEncryptionKey }: {
         RPC_url: string,
         owner: string | number[] | Uint8Array | Keypair,
         storage?: CacheStorage,
-        enableDebug?: boolean
+        enableDebug?: boolean,
+        storageKeyEncryptionKey?: string
     }) {
         let keypair = getSolanaKeypair(owner)
         if (!keypair) {
@@ -40,6 +45,11 @@ export class PrivacyCash {
         this.publicKey = keypair.publicKey
         this.encryptionService = new EncryptionService();
         this.encryptionService.deriveEncryptionKeyFromWallet(this.keypair);
+        
+        // Store encryption key for storage key encryption if provided
+        if (storageKeyEncryptionKey) {
+            this.storageKeyEncryptionKey = storageKeyEncryptionKey;
+        }
         
         // Use provided storage or fall back to browser localStorage or node-localstorage
         if (storage) {
@@ -70,27 +80,41 @@ export class PrivacyCash {
     }
 
     /**
+     * Set the encryption key for storage key encryption
+     * This key is used to encrypt public keys in storage key names to prevent exposure
+     * 
+     * @param encryptionKey - The encryption key (base64 string from session key)
+     */
+    setStorageKeyEncryptionKey(encryptionKey: string): void {
+        this.storageKeyEncryptionKey = encryptionKey;
+    }
+
+    /**
      * Clears the cache of utxos.
      * 
      * By default, downloaded utxos will be cached in the local storage. Thus the next time when you makes another
      * deposit or withdraw or getPrivateBalance, the SDK only fetches the utxos that are not in the cache.
      * 
-     * This method clears the cache of utxos.
+     * This method clears the cache of utxos, including both new hashed format and old format keys.
      */
     async clearCache() {
         if (!this.publicKey) {
             return this
         }
-        const storageKeySuffix = await localstorageKey(this.publicKey);
-        this.storage.removeItem(LSK_FETCH_OFFSET + storageKeySuffix)
-        this.storage.removeItem(LSK_ENCRYPTED_OUTPUTS + storageKeySuffix)
-        // Also clear old format keys if they exist (for cleanup)
+        const storageKeySuffix = await localstorageKey(this.publicKey, this.storageKeyEncryptionKey);
+        await Promise.all([
+            this.storage.removeItem(LSK_FETCH_OFFSET + storageKeySuffix),
+            this.storage.removeItem(LSK_ENCRYPTED_OUTPUTS + storageKeySuffix)
+        ]);
+        // Also clear old format keys if they exist (for cleanup during migration period)
         const oldKeySuffix = this.publicKey.toString();
         const contractPrefix = PROGRAM_ID.toString().substring(0, 6);
         const oldSuffix = contractPrefix + oldKeySuffix;
-        this.storage.removeItem(LSK_FETCH_OFFSET + oldSuffix)
-        this.storage.removeItem(LSK_ENCRYPTED_OUTPUTS + oldSuffix)
-        this.storage.removeItem('tradeHistory' + oldSuffix)
+        await Promise.all([
+            this.storage.removeItem(LSK_FETCH_OFFSET + oldSuffix),
+            this.storage.removeItem(LSK_ENCRYPTED_OUTPUTS + oldSuffix),
+            this.storage.removeItem('tradeHistory' + oldSuffix)
+        ]);
         return this
     }
 
@@ -116,7 +140,8 @@ export class PrivacyCash {
                 return tx
             },
             keyBasePath: path.join(import.meta.dirname, '..', 'circuit2', 'transaction2'),
-            storage: this.storage
+            storage: this.storage,
+            storageKeyEncryptionKey: this.storageKeyEncryptionKey
         })
         this.isRuning = false
         return res
@@ -143,7 +168,8 @@ export class PrivacyCash {
             publicKey: this.publicKey,
             recipient,
             keyBasePath: path.join(import.meta.dirname, '..', 'circuit2', 'transaction2'),
-            storage: this.storage
+            storage: this.storage,
+            storageKeyEncryptionKey: this.storageKeyEncryptionKey
         })
         console.log(`Withdraw successful. Recipient ${recipient} received ${res.amount_in_lamports / LAMPORTS_PER_SOL} SOL, with ${res.fee_in_lamports / LAMPORTS_PER_SOL} SOL relayers fees`)
         this.isRuning = false
@@ -156,7 +182,13 @@ export class PrivacyCash {
     async getPrivateBalance() {
         logger.info('getting private balance')
         this.isRuning = true
-        let utxos = await getUtxos({ publicKey: this.publicKey, connection: this.connection, encryptionService: this.encryptionService, storage: this.storage })
+        let utxos = await getUtxos({ 
+            publicKey: this.publicKey, 
+            connection: this.connection, 
+            encryptionService: this.encryptionService, 
+            storage: this.storage,
+            storageKeyEncryptionKey: this.storageKeyEncryptionKey
+        })
         this.isRuning = false
         return getBalanceFromUtxos(utxos)
     }

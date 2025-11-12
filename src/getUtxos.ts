@@ -9,6 +9,7 @@ import * as ffjavascript from 'ffjavascript';
 import { FETCH_UTXOS_GROUP_SIZE, INDEXER_API_URL, LSK_ENCRYPTED_OUTPUTS, LSK_FETCH_OFFSET, PROGRAM_ID } from './utils/constants.js';
 import { logger } from './utils/logger.js';
 import type { CacheStorage } from './index.js';
+import { encryptStorageKeyName, decryptStorageKeyName } from './utils/storage-key-encryption.js';
 
 // Use type assertion for the utility functions (same pattern as in get_verification_keys.ts)
 const utils = ffjavascript.utils as any;
@@ -40,10 +41,13 @@ function sleep(ms: number): Promise<string> {
 
 // Cache for hashed public keys to avoid repeated hashing
 const publicKeyHashCache = new Map<string, string>();
+// Cache for encrypted public keys to avoid repeated encryption
+const publicKeyEncryptionCache = new Map<string, string>();
 
 /**
  * Hash a public key using SHA-256 and return base64url-encoded result
  * Uses Web Crypto API for hashing
+ * Used as fallback when encryption key is not available
  */
 async function hashPublicKey(publicKey: PublicKey): Promise<string> {
     const keyString = publicKey.toString();
@@ -73,13 +77,32 @@ async function hashPublicKey(publicKey: PublicKey): Promise<string> {
 
 /**
  * Generate a storage key from a public key
- * Uses hashed public key to prevent address leakage
- * Format: <prefix><5 contract chars><hashed public key>
+ * Uses encrypted public key when encryption key is available, otherwise falls back to hashing
+ * Format: <prefix><5 contract chars><encrypted/hashed public key>
+ * 
+ * @param key - The public key
+ * @param encryptionKey - Optional encryption key for encrypting the public key
+ * @returns Storage key suffix (contract prefix + encrypted/hashed public key)
  */
-export async function localstorageKey(key: PublicKey): Promise<string> {
+export async function localstorageKey(key: PublicKey, encryptionKey?: string | null): Promise<string> {
     const contractPrefix = PROGRAM_ID.toString().substring(0, 6);
-    const hashedKey = await hashPublicKey(key);
-    return contractPrefix + hashedKey;
+    const keyString = key.toString();
+    
+    if (encryptionKey) {
+        // Use encryption if encryption key is available
+        const cacheKey = `${keyString}:${encryptionKey}`;
+        if (publicKeyEncryptionCache.has(cacheKey)) {
+            return contractPrefix + publicKeyEncryptionCache.get(cacheKey)!;
+        }
+        
+        const encryptedKey = await encryptStorageKeyName(keyString, encryptionKey);
+        publicKeyEncryptionCache.set(cacheKey, encryptedKey);
+        return contractPrefix + encryptedKey;
+    } else {
+        // Fall back to hashing for backward compatibility
+        const hashedKey = await hashPublicKey(key);
+        return contractPrefix + hashedKey;
+    }
 }
 
 /**
@@ -102,12 +125,18 @@ let decryptionTaskFinished = 0;
  */
 
 /**
- * Migrate old-format storage keys to new hashed format
- * Checks for old keys and migrates data if found
+ * Migrate old-format storage keys to new encrypted/hashed format.
+ * Checks for old keys and migrates data if found. Old keys are deleted after migration.
+ * Supports migration: old format (unhashed) → hashed → encrypted
+ * 
+ * @param publicKey - The wallet's public key
+ * @param storage - The cache storage adapter
+ * @param encryptionKey - Optional encryption key for encrypting storage keys
  */
-async function migrateStorageKeys(publicKey: PublicKey, storage: CacheStorage): Promise<void> {
+export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheStorage, encryptionKey?: string | null): Promise<void> {
     const oldKeySuffix = localstorageKeyOld(publicKey);
-    const newKeySuffix = await localstorageKey(publicKey);
+    const hashedKeySuffix = await localstorageKey(publicKey, null); // Hashed format (no encryption key)
+    const newKeySuffix = await localstorageKey(publicKey, encryptionKey); // Encrypted or hashed depending on encryption key
     
     // Keys to migrate
     const keysToMigrate = [
@@ -116,31 +145,34 @@ async function migrateStorageKeys(publicKey: PublicKey, storage: CacheStorage): 
         { prefix: 'tradeHistory', name: 'tradeHistory' }
     ];
     
+    const oldKeysToDelete: string[] = [];
+    
     for (const { prefix, name } of keysToMigrate) {
         const oldKey = prefix + oldKeySuffix;
+        const hashedKey = prefix + hashedKeySuffix;
         const newKey = prefix + newKeySuffix;
         
-        // Check if old key exists
+        // Skip if new key is the same as hashed key (no encryption key available)
+        const needsMigration = encryptionKey && hashedKeySuffix !== newKeySuffix;
+        
+        // First, migrate from old format (unhashed) if it exists
         const oldValue = storage.getItem(oldKey);
         if (oldValue !== null) {
             logger.debug(`Migrating ${name} key from old format to new format`);
-            
-            // Read old value
-            const value = oldValue;
             
             // Check if new key already exists (partial migration)
             const newValue = storage.getItem(newKey);
             if (newValue === null) {
                 // Write to new key
-                storage.setItem(newKey, value);
+                storage.setItem(newKey, oldValue);
                 logger.debug(`Migrated ${name} data to new key`);
             } else {
                 // Merge logic for encrypted_outputs and tradeHistory
                 if (name === 'encrypted_outputs' || name === 'tradeHistory') {
                     try {
                         const oldData = name === 'encrypted_outputs' 
-                            ? JSON.parse(value) 
-                            : value.split(',').map(n => Number(n));
+                            ? JSON.parse(oldValue) 
+                            : oldValue.split(',').map(n => Number(n));
                         const newData = name === 'encrypted_outputs'
                             ? JSON.parse(newValue)
                             : newValue.split(',').map(n => Number(n));
@@ -160,27 +192,107 @@ async function migrateStorageKeys(publicKey: PublicKey, storage: CacheStorage): 
                     }
                 } else {
                     // For fetch_offset, prefer the larger value
-                    const oldNum = Number(value);
+                    const oldNum = Number(oldValue);
                     const newNum = Number(newValue);
                     if (oldNum > newNum) {
-                        storage.setItem(newKey, value);
+                        storage.setItem(newKey, oldValue);
                         logger.debug(`Updated ${name} with larger value from old key`);
                     }
                 }
             }
             
-            // Delete old key after successful migration
-            storage.removeItem(oldKey);
-            logger.debug(`Deleted old ${name} key`);
+            // Collect old key for batch deletion
+            oldKeysToDelete.push(oldKey);
+        } else {
+            // Still mark for deletion - old keys may exist in Chrome storage even if not in cache
+            oldKeysToDelete.push(oldKey);
+        }
+        
+        // Second, migrate from hashed format to encrypted format if encryption key is available
+        if (needsMigration) {
+            const hashedValue = storage.getItem(hashedKey);
+            if (hashedValue !== null) {
+                logger.debug(`Migrating ${name} key from hashed format to encrypted format`);
+                
+                // Check if encrypted key already exists
+                const encryptedValue = storage.getItem(newKey);
+                if (encryptedValue === null) {
+                    // Write to encrypted key
+                    storage.setItem(newKey, hashedValue);
+                    logger.debug(`Migrated ${name} data from hashed to encrypted key`);
+                } else {
+                    // Merge logic for encrypted_outputs and tradeHistory
+                    if (name === 'encrypted_outputs' || name === 'tradeHistory') {
+                        try {
+                            const hashedData = name === 'encrypted_outputs' 
+                                ? JSON.parse(hashedValue) 
+                                : hashedValue.split(',').map(n => Number(n));
+                            const encryptedData = name === 'encrypted_outputs'
+                                ? JSON.parse(encryptedValue)
+                                : encryptedValue.split(',').map(n => Number(n));
+                            
+                            // Merge and deduplicate
+                            if (name === 'encrypted_outputs') {
+                                const merged = [...new Set([...hashedData, ...encryptedData])];
+                                storage.setItem(newKey, JSON.stringify(merged));
+                            } else {
+                                const merged = [...new Set([...hashedData, ...encryptedData])];
+                                const top20 = merged.sort((a, b) => b - a).slice(0, 20);
+                                storage.setItem(newKey, top20.join(','));
+                            }
+                            logger.debug(`Merged ${name} data from hashed and encrypted keys`);
+                        } catch (e) {
+                            logger.debug(`Error merging ${name}, keeping encrypted value`);
+                        }
+                    } else {
+                        // For fetch_offset, prefer the larger value
+                        const hashedNum = Number(hashedValue);
+                        const encryptedNum = Number(encryptedValue);
+                        if (hashedNum > encryptedNum) {
+                            storage.setItem(newKey, hashedValue);
+                            logger.debug(`Updated ${name} with larger value from hashed key`);
+                        }
+                    }
+                }
+                
+                // Mark hashed key for deletion
+                oldKeysToDelete.push(hashedKey);
+            }
+        }
+    }
+    
+    // Delete old keys from Chrome storage
+    if (oldKeysToDelete.length > 0) {
+        try {
+            // Delete directly from Chrome storage if available
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                await new Promise<void>((resolve, reject) => {
+                    (chrome.storage.local as any).remove(oldKeysToDelete, () => {
+                        if (chrome.runtime.lastError) {
+                            reject(chrome.runtime.lastError);
+                        } else {
+                            resolve();
+                        }
+                    });
+                });
+            } else {
+                // Fallback to adapter method
+                await Promise.all(oldKeysToDelete.map(key => storage.removeItem(key)));
+            }
+            logger.debug(`Deleted ${oldKeysToDelete.length} old storage keys`);
+        } catch (err) {
+            logger.debug(`Error deleting old keys: ${err}`);
+            // Continue anyway - keys may still be deleted
         }
     }
 }
 
-export async function getUtxos({ publicKey, connection, encryptionService, storage }: {
+export async function getUtxos({ publicKey, connection, encryptionService, storage, storageKeyEncryptionKey }: {
     publicKey: PublicKey,
     connection: Connection,
     encryptionService: EncryptionService,
-    storage: CacheStorage
+    storage: CacheStorage,
+    storageKeyEncryptionKey?: string | null
 }): Promise<Utxo[]> {
     if (!getMyUtxosPromise) {
         getMyUtxosPromise = (async () => {
@@ -189,9 +301,9 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
             let history_indexes: number[] = []
             try {
                 // Migrate old keys to new format if needed
-                await migrateStorageKeys(publicKey, storage);
+                await migrateStorageKeys(publicKey, storage, storageKeyEncryptionKey);
                 
-                const storageKeySuffix = await localstorageKey(publicKey);
+                const storageKeySuffix = await localstorageKey(publicKey, storageKeyEncryptionKey);
                 let offsetStr = storage.getItem(LSK_FETCH_OFFSET + storageKeySuffix)
                 if (offsetStr) {
                     roundStartIndex = Number(offsetStr)
@@ -204,7 +316,7 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
                     let fetch_utxo_offset = offsetStr ? Number(offsetStr) : 0
                     let fetch_utxo_end = fetch_utxo_offset + FETCH_UTXOS_GROUP_SIZE
                     let fetch_utxo_url = `${INDEXER_API_URL}/utxos/range?start=${fetch_utxo_offset}&end=${fetch_utxo_end}`
-                    let fetched = await fetchUserUtxos({ publicKey, connection, url: fetch_utxo_url, encryptionService, storage })
+                    let fetched = await fetchUserUtxos({ publicKey, connection, url: fetch_utxo_url, encryptionService, storage, storageKeyEncryptionKey })
                     let am = 0
 
                     const nonZeroUtxos: Utxo[] = [];
@@ -239,7 +351,7 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
                 getMyUtxosPromise = null
             }
             // get history index
-            const storageKeySuffix = await localstorageKey(publicKey);
+            const storageKeySuffix = await localstorageKey(publicKey, storageKeyEncryptionKey);
             let historyKey = 'tradeHistory' + storageKeySuffix
             let rec = storage.getItem(historyKey)
             let recIndexes: number[] = []
@@ -265,12 +377,13 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
     return getMyUtxosPromise
 }
 
-async function fetchUserUtxos({ publicKey, connection, url, storage, encryptionService }: {
+async function fetchUserUtxos({ publicKey, connection, url, storage, encryptionService, storageKeyEncryptionKey }: {
     publicKey: PublicKey,
     connection: Connection,
     url: string,
     encryptionService: EncryptionService,
-    storage: CacheStorage
+    storage: CacheStorage,
+    storageKeyEncryptionKey?: string | null
 }): Promise<{
     encryptedOutputs: string[],
     utxos: Utxo[],
@@ -315,7 +428,7 @@ async function fetchUserUtxos({ publicKey, connection, url, storage, encryptionS
     let successfulDecryptions = 0;
 
     let cachedStringNum = 0
-    const storageKeySuffix = await localstorageKey(publicKey);
+    const storageKeySuffix = await localstorageKey(publicKey, storageKeyEncryptionKey);
     let cachedString = storage.getItem(LSK_ENCRYPTED_OUTPUTS + storageKeySuffix)
     if (cachedString) {
         cachedStringNum = JSON.parse(cachedString).length
