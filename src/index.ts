@@ -55,11 +55,23 @@ export class PrivacyCash {
         if (storage) {
             this.storage = storage;
         } else if (typeof window !== 'undefined' && window.localStorage) {
-            this.storage = window.localStorage as CacheStorage;
+            // Wrap localStorage to match CacheStorage interface (removeItem needs to return Promise)
+            const localStorageWrapper: CacheStorage = {
+                getItem: (key: string) => window.localStorage.getItem(key),
+                setItem: (key: string, value: string) => { window.localStorage.setItem(key, value); },
+                removeItem: async (key: string) => { window.localStorage.removeItem(key); }
+            };
+            this.storage = localStorageWrapper;
         } else {
             // Fallback for Node.js environment
             const { LocalStorage } = require('node-localstorage');
-            this.storage = new LocalStorage(path.join(process.cwd(), 'cache')) as CacheStorage;
+            const nodeStorage = new LocalStorage(path.join(process.cwd(), 'cache'));
+            const nodeStorageWrapper: CacheStorage = {
+                getItem: (key: string) => nodeStorage.getItem(key),
+                setItem: (key: string, value: string) => { nodeStorage.setItem(key, value); },
+                removeItem: async (key: string) => { nodeStorage.removeItem(key); }
+            };
+            this.storage = nodeStorageWrapper;
         }
         
         if (!enableDebug) {

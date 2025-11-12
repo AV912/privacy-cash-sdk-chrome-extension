@@ -53,10 +53,11 @@ type WithdrawParams = {
     encryptionService: EncryptionService,
     lightWasm: hasher.LightWasm,
     recipient: PublicKey,
-    storage: CacheStorage
+    storage: CacheStorage,
+    storageKeyEncryptionKey?: string | null
 }
 
-export async function withdraw({ recipient, lightWasm, storage, publicKey, connection, amount_in_lamports, encryptionService, keyBasePath }: WithdrawParams) {
+export async function withdraw({ recipient, lightWasm, storage, publicKey, connection, amount_in_lamports, encryptionService, keyBasePath, storageKeyEncryptionKey }: WithdrawParams) {
     let fee_in_lamports = amount_in_lamports * (await getConfig('withdraw_fee_rate')) + LAMPORTS_PER_SOL * (await getConfig('withdraw_rent_fee'))
     amount_in_lamports -= fee_in_lamports
     let isPartial = false
@@ -85,7 +86,7 @@ export async function withdraw({ recipient, lightWasm, storage, publicKey, conne
 
     // Fetch existing UTXOs for this user
     logger.debug('\nFetching existing UTXOs...');
-    const unspentUtxos = await getUtxos({ connection, publicKey, encryptionService, storage });
+    const unspentUtxos = await getUtxos({ connection, publicKey, encryptionService, storage, storageKeyEncryptionKey });
     logger.debug(`Found ${unspentUtxos.length} total UTXOs`);
 
     // Calculate and log total unspent UTXO balance

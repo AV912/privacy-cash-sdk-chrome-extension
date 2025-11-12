@@ -63,9 +63,10 @@ type DepositParams = {
     keyBasePath: string,
     lightWasm: hasher.LightWasm,
     referrer?: string,
-    transactionSigner: (tx: VersionedTransaction) => Promise<VersionedTransaction>
+    transactionSigner: (tx: VersionedTransaction) => Promise<VersionedTransaction>,
+    storageKeyEncryptionKey?: string | null
 }
-export async function deposit({ lightWasm, storage, keyBasePath, publicKey, connection, amount_in_lamports, encryptionService, transactionSigner, referrer }: DepositParams) {
+export async function deposit({ lightWasm, storage, keyBasePath, publicKey, connection, amount_in_lamports, encryptionService, transactionSigner, referrer, storageKeyEncryptionKey }: DepositParams) {
     // check limit
     let limitAmount = await checkDepositLimit(connection)
     if (limitAmount && amount_in_lamports > limitAmount * LAMPORTS_PER_SOL) {
@@ -108,7 +109,7 @@ export async function deposit({ lightWasm, storage, keyBasePath, publicKey, conn
 
     // Fetch existing UTXOs for this user
     logger.debug('\nFetching existing UTXOs...');
-    const existingUnspentUtxos = await getUtxos({ connection, publicKey, encryptionService, storage });
+    const existingUnspentUtxos = await getUtxos({ connection, publicKey, encryptionService, storage, storageKeyEncryptionKey });
 
     // Calculate output amounts and external amount based on scenario
     let extAmount: number;
