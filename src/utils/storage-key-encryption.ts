@@ -31,7 +31,11 @@ export async function encryptStorageKeyName(
     // Decode the encryption key from base64
     let keyBytes: Uint8Array;
     try {
-      keyBytes = Uint8Array.from(atob(encryptionKey), c => c.charCodeAt(0));
+      const decoded = atob(encryptionKey);
+      keyBytes = new Uint8Array(decoded.length);
+      for (let i = 0; i < decoded.length; i++) {
+        keyBytes[i] = decoded.charCodeAt(i);
+      }
       console.log(`🔐 [ENCRYPT] Decoded key bytes length: ${keyBytes.length}`);
       console.error(`🔐 [ENCRYPT ERROR CHANNEL] Decoded key bytes length: ${keyBytes.length}`);
     } catch (e) {
@@ -45,7 +49,7 @@ export async function encryptStorageKeyName(
     try {
       cryptoKey = await crypto.subtle.importKey(
         'raw',
-        keyBytes,
+        keyBytes.buffer as ArrayBuffer,
         { name: 'AES-GCM' },
         false,
         ['encrypt']
@@ -121,12 +125,16 @@ export async function decryptStorageKeyName(
 ): Promise<string> {
   try {
     // Decode the encryption key from base64
-    const keyBytes = Uint8Array.from(atob(encryptionKey), c => c.charCodeAt(0));
+    const decoded = atob(encryptionKey);
+    const keyBytes = new Uint8Array(decoded.length);
+    for (let i = 0; i < decoded.length; i++) {
+      keyBytes[i] = decoded.charCodeAt(i);
+    }
     
     // Import the encryption key
     const cryptoKey = await crypto.subtle.importKey(
       'raw',
-      keyBytes,
+      keyBytes.buffer as ArrayBuffer,
       { name: 'AES-GCM' },
       false,
       ['decrypt']
