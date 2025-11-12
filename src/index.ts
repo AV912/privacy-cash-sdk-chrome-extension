@@ -204,8 +204,9 @@ export class PrivacyCash {
      * Returns the amount of lamports current wallet has in Privacy Cash.
      */
     async getPrivateBalance() {
-        // Use console.info directly to ensure logs are captured
-        console.info('🔐 [PRIVACY] Getting private balance...');
+        // Use console.log directly to ensure visibility in browser console
+        console.log('%c🔐 [PRIVACY SDK] getPrivateBalance() CALLED', 'color: red; font-size: 16px; font-weight: bold;');
+        console.error('🔐 [PRIVACY SDK ERROR CHANNEL] getPrivateBalance() called');
         logger.info('getting private balance')
         this.isRuning = true
         let utxos = await getUtxos({ 

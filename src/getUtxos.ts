@@ -138,13 +138,15 @@ export async function migrateStorageKeys(publicKey: PublicKey, storage: CacheSto
     const hashedKeySuffix = await localstorageKey(publicKey, null); // Hashed format (no encryption key)
     const newKeySuffix = await localstorageKey(publicKey, encryptionKey); // Encrypted or hashed depending on encryption key
     
-    // Log migration start - use console.info directly to ensure capture
+    // Log migration start - use console.log directly to ensure visibility
     const hasEncryptionKey = !!encryptionKey;
     const willEncrypt = hasEncryptionKey && hashedKeySuffix !== newKeySuffix;
     const logMsg1 = `🔄 [MIGRATION] Starting storage key migration for wallet ${publicKey.toString().slice(0, 8)}...`;
     const logMsg2 = `🔐 [MIGRATION] Encryption key available: ${hasEncryptionKey ? 'YES' : 'NO'} (will ${willEncrypt ? 'encrypt' : 'hash'} keys)`;
-    console.info(logMsg1);
-    console.info(logMsg2);
+    console.log('%c' + logMsg1, 'color: purple; font-size: 16px; font-weight: bold;');
+    console.log('%c' + logMsg2, 'color: purple; font-size: 14px; font-weight: bold;');
+    console.error(`🔄 [MIGRATION ERROR CHANNEL] ${logMsg1}`);
+    console.error(`🔐 [MIGRATION ERROR CHANNEL] ${logMsg2}`);
     logger.info(logMsg1);
     logger.info(logMsg2);
     
@@ -337,24 +339,31 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
     storageKeyEncryptionKey?: string | null
 }): Promise<Utxo[]> {
     // CRITICAL: Log immediately when function is called (before promise check)
-    console.info(`🔍 [SDK] getUtxos() called for wallet ${publicKey.toString().slice(0, 8)}...`);
-    console.info(`🔍 [SDK] Promise cache status: ${getMyUtxosPromise ? 'EXISTS' : 'NULL'}`);
-    console.info(`🔍 [SDK] Encryption key provided: ${storageKeyEncryptionKey ? 'YES' : 'NO'}`);
+    // Use console.log and console.error to ensure visibility in browser console
+    console.log('%c🔍 [SDK] getUtxos() CALLED', 'color: red; font-size: 16px; font-weight: bold;');
+    console.log(`🔍 [SDK] Wallet: ${publicKey.toString().slice(0, 8)}...`);
+    console.log(`🔍 [SDK] Promise cache: ${getMyUtxosPromise ? 'EXISTS' : 'NULL'}`);
+    console.log(`🔍 [SDK] Encryption key: ${storageKeyEncryptionKey ? 'YES' : 'NO'}`);
+    console.error(`🔍 [SDK ERROR CHANNEL] getUtxos() called - this is a test log`);
     
     if (!getMyUtxosPromise) {
-        console.info(`🔍 [SDK] Creating new promise - migration will run`);
+        console.log('%c🔍 [SDK] Creating NEW promise - migration WILL RUN', 'color: green; font-size: 14px; font-weight: bold;');
+        console.error(`🔍 [SDK ERROR CHANNEL] Creating new promise - migration will run`);
         getMyUtxosPromise = (async () => {
             let valid_utxos: Utxo[] = []
             let valid_strings: string[] = []
             let history_indexes: number[] = []
             try {
-                // Log that we're starting UTXO fetch (which triggers migration) - use console.info directly
+                // Log that we're starting UTXO fetch (which triggers migration) - use console.log directly
                 const utxoLogMsg = `🔄 [UTXO] Starting UTXO fetch for wallet ${publicKey.toString().slice(0, 8)}...`;
-                console.info(utxoLogMsg);
+                console.log('%c' + utxoLogMsg, 'color: blue; font-size: 14px; font-weight: bold;');
+                console.error(`🔄 [UTXO ERROR CHANNEL] ${utxoLogMsg}`);
                 logger.info(utxoLogMsg);
                 
                 // Migrate old keys to new format if needed
+                console.log('%c🔄 [MIGRATION] About to call migrateStorageKeys()', 'color: orange; font-size: 14px; font-weight: bold;');
                 await migrateStorageKeys(publicKey, storage, storageKeyEncryptionKey);
+                console.log('%c✅ [MIGRATION] migrateStorageKeys() completed', 'color: green; font-size: 14px; font-weight: bold;');
                 
                 const storageKeySuffix = await localstorageKey(publicKey, storageKeyEncryptionKey);
                 let offsetStr = storage.getItem(LSK_FETCH_OFFSET + storageKeySuffix)
@@ -428,7 +437,8 @@ export async function getUtxos({ publicKey, connection, encryptionService, stora
             return valid_utxos
         })()
     } else {
-        console.info(`🔍 [SDK] Using cached promise - migration already ran`);
+        console.log('%c🔍 [SDK] Using CACHED promise - migration already ran', 'color: yellow; font-size: 14px; font-weight: bold;');
+        console.error(`🔍 [SDK ERROR CHANNEL] Using cached promise - migration already ran`);
     }
     return getMyUtxosPromise
 }
