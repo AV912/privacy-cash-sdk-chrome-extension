@@ -1,17 +1,14 @@
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import { deposit } from './deposit.js';
-import { getBalanceFromUtxos, getUtxos, localstorageKey, migrateStorageKeys } from './getUtxos.js';
+import { getBalanceFromUtxos, getUtxos, localstorageKey } from './getUtxos.js';
 
-import { LSK_ENCRYPTED_OUTPUTS, LSK_FETCH_OFFSET, PROGRAM_ID } from './utils/constants.js';
+import { LSK_ENCRYPTED_OUTPUTS, LSK_FETCH_OFFSET } from './utils/constants.js';
 import { logger, type LoggerFn, setLogger } from './utils/logger.js';
 import { EncryptionService } from './utils/encryption.js';
 import { WasmFactory } from '@lightprotocol/hasher.rs';
 import bs58 from 'bs58'
 import { withdraw } from './withdraw.js';
 import path from 'node:path'
-
-// Re-export migrateStorageKeys and migrateMultipleWalletsKeys for direct use
-export { migrateStorageKeys, migrateMultipleWalletsKeys } from './getUtxos.js';
 
 // Storage interface for cache persistence
 export interface CacheStorage {
@@ -118,8 +115,6 @@ export class PrivacyCash {
      * 
      * By default, downloaded utxos will be cached in the local storage. Thus the next time when you makes another
      * deposit or withdraw or getPrivateBalance, the SDK only fetches the utxos that are not in the cache.
-     * 
-     * This method clears the cache of utxos, including both new hashed format and old format keys.
      */
     async clearCache() {
         if (!this.publicKey) {
@@ -129,15 +124,6 @@ export class PrivacyCash {
         await Promise.all([
             this.storage.removeItem(LSK_FETCH_OFFSET + storageKeySuffix),
             this.storage.removeItem(LSK_ENCRYPTED_OUTPUTS + storageKeySuffix)
-        ]);
-        // Also clear old format keys if they exist (for cleanup during migration period)
-        const oldKeySuffix = this.publicKey.toString();
-        const contractPrefix = PROGRAM_ID.toString().substring(0, 6);
-        const oldSuffix = contractPrefix + oldKeySuffix;
-        await Promise.all([
-            this.storage.removeItem(LSK_FETCH_OFFSET + oldSuffix),
-            this.storage.removeItem(LSK_ENCRYPTED_OUTPUTS + oldSuffix),
-            this.storage.removeItem('tradeHistory' + oldSuffix)
         ]);
         return this
     }
