@@ -39,89 +39,56 @@ function sleep(ms: number): Promise<string> {
     }, ms))
 }
 
-// Cache for hashed public keys to avoid repeated hashing
-const publicKeyHashCache = new Map<string, string>();
 // Cache for encrypted public keys to avoid repeated encryption
 const publicKeyEncryptionCache = new Map<string, string>();
 
 /**
- * Hash a public key using SHA-256 and return base64url-encoded result
- * Uses Web Crypto API for hashing
- * Used as fallback when encryption key is not available
- */
-async function hashPublicKey(publicKey: PublicKey): Promise<string> {
-    const keyString = publicKey.toString();
-    
-    // Check cache first
-    if (publicKeyHashCache.has(keyString)) {
-        return publicKeyHashCache.get(keyString)!;
-    }
-    
-    // Convert public key string to bytes
-    const encoder = new TextEncoder();
-    const data = encoder.encode(keyString);
-    
-    // Hash using Web Crypto API
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    
-    // Convert to base64url (URL-safe base64)
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const base64 = btoa(String.fromCharCode(...hashArray));
-    const base64url = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-    
-    // Cache the result
-    publicKeyHashCache.set(keyString, base64url);
-    
-    return base64url;
-}
-
-/**
  * Generate a storage key from a public key
- * Uses encrypted public key when encryption key is available, otherwise falls back to hashing
- * Format: <prefix><5 contract chars><encrypted/hashed public key>
+ * REQUIRES encryption key - encryption is mandatory, no hashing fallback
+ * Format: <prefix><5 contract chars><encrypted public key>
  * 
  * @param key - The public key
- * @param encryptionKey - Optional encryption key for encrypting the public key
- * @returns Storage key suffix (contract prefix + encrypted/hashed public key)
+ * @param encryptionKey - REQUIRED encryption key for encrypting the public key
+ * @returns Storage key suffix (contract prefix + encrypted public key)
+ * @throws Error if encryptionKey is not provided
  */
-export async function localstorageKey(key: PublicKey, encryptionKey?: string | null): Promise<string> {
+export async function localstorageKey(key: PublicKey, encryptionKey: string | null | undefined): Promise<string> {
     const contractPrefix = PROGRAM_ID.toString().substring(0, 6);
     const keyString = key.toString();
     
     console.log(`🔑 [localstorageKey] Called with encryptionKey: ${!!encryptionKey ? 'YES' : 'NO'}, type: ${typeof encryptionKey}, length: ${encryptionKey ? encryptionKey.length : 0}`);
     console.error(`🔑 [localstorageKey ERROR CHANNEL] encryptionKey: ${!!encryptionKey ? 'YES' : 'NO'}`);
     
-    if (encryptionKey) {
-        // Use encryption if encryption key is available
-        const cacheKey = `${keyString}:${encryptionKey}`;
-        if (publicKeyEncryptionCache.has(cacheKey)) {
-            const cached = publicKeyEncryptionCache.get(cacheKey)!;
-            console.log(`🔑 [localstorageKey] Using cached encrypted key, length: ${cached.length}`);
-            console.error(`🔑 [localstorageKey ERROR CHANNEL] Using cached encrypted key`);
-            return contractPrefix + cached;
-        }
-        
-        console.log(`🔑 [localstorageKey] Calling encryptStorageKeyName...`);
-        console.error(`🔑 [localstorageKey ERROR CHANNEL] Calling encryptStorageKeyName`);
-        let encryptedKey: string;
-        try {
-            encryptedKey = await encryptStorageKeyName(keyString, encryptionKey);
-            console.log(`🔑 [localstorageKey] encryptStorageKeyName returned, length: ${encryptedKey.length}, preview: ${encryptedKey.slice(0, 30)}...`);
-            console.error(`🔑 [localstorageKey ERROR CHANNEL] encryptStorageKeyName returned`);
-            publicKeyEncryptionCache.set(cacheKey, encryptedKey);
-            return contractPrefix + encryptedKey;
-        } catch (error) {
-            console.error(`❌ [localstorageKey] encryptStorageKeyName failed:`, error);
-            console.error(`❌ [localstorageKey ERROR CHANNEL] Encryption failed: ${error}`);
-            // Don't fall back - throw the error so caller knows encryption failed
-            throw error;
-        }
-    } else {
-        // Fall back to hashing for backward compatibility
-        console.log(`🔑 [localstorageKey] No encryption key, using hash`);
-        console.error(`🔑 [localstorageKey ERROR CHANNEL] Using hash`);
-    const hashedKey = await hashPublicKey(key);
-    return contractPrefix + hashedKey;
+    // Encryption key is REQUIRED - no hashing fallback
+    if (!encryptionKey) {
+        const error = new Error('Encryption key is required for storage key generation. Wallet must be unlocked with password.');
+        console.error(`❌ [localstorageKey] Encryption key missing:`, error);
+        console.error(`❌ [localstorageKey ERROR CHANNEL] Encryption key required`);
+        throw error;
+    }
+    
+    // Use encryption
+    const cacheKey = `${keyString}:${encryptionKey}`;
+    if (publicKeyEncryptionCache.has(cacheKey)) {
+        const cached = publicKeyEncryptionCache.get(cacheKey)!;
+        console.log(`🔑 [localstorageKey] Using cached encrypted key, length: ${cached.length}`);
+        console.error(`🔑 [localstorageKey ERROR CHANNEL] Using cached encrypted key`);
+        return contractPrefix + cached;
+    }
+    
+    console.log(`🔑 [localstorageKey] Calling encryptStorageKeyName...`);
+    console.error(`🔑 [localstorageKey ERROR CHANNEL] Calling encryptStorageKeyName`);
+    let encryptedKey: string;
+    try {
+        encryptedKey = await encryptStorageKeyName(keyString, encryptionKey);
+        console.log(`🔑 [localstorageKey] encryptStorageKeyName returned, length: ${encryptedKey.length}, preview: ${encryptedKey.slice(0, 30)}...`);
+        console.error(`🔑 [localstorageKey ERROR CHANNEL] encryptStorageKeyName returned`);
+        publicKeyEncryptionCache.set(cacheKey, encryptedKey);
+        return contractPrefix + encryptedKey;
+    } catch (error) {
+        console.error(`❌ [localstorageKey] encryptStorageKeyName failed:`, error);
+        console.error(`❌ [localstorageKey ERROR CHANNEL] Encryption failed: ${error}`);
+        throw error;
     }
 }
 
