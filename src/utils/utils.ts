@@ -11,7 +11,7 @@ import * as borsh from 'borsh';
 import { sha256 } from '@ethersproject/sha2';
 import { PublicKey } from '@solana/web3.js';
 import { INDEXER_API_URL, PROGRAM_ID } from './constants.js';
-import { logger } from './logger.js';
+import { logger, conditionalError } from './logger.js';
 import { getConfig } from '../config.js';
 
 /**
@@ -126,7 +126,7 @@ export async function fetchMerkleProof(commitment: string): Promise<{ pathElemen
     logger.debug(`✓ Fetched Merkle proof with ${data.pathElements.length} elements`);
     return data;
   } catch (error) {
-    console.error(`Failed to fetch Merkle proof for commitment ${commitment}:`, error);
+    conditionalError(`Failed to fetch Merkle proof for commitment ${commitment}:`, error);
     throw error;
   }
 }
@@ -159,7 +159,7 @@ export async function queryRemoteTreeState(): Promise<{ root: string, nextIndex:
     logger.debug(`Fetched nextIndex from API: ${data.nextIndex}`);
     return data;
   } catch (error) {
-    console.error('Failed to fetch root and nextIndex from API:', error);
+    conditionalError('Failed to fetch root and nextIndex from API:', error);
     throw error;
   }
 }

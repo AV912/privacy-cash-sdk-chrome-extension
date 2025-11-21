@@ -7,7 +7,7 @@ import { WasmFactory } from '@lightprotocol/hasher.rs';
 //@ts-ignore
 import * as ffjavascript from 'ffjavascript';
 import { FETCH_UTXOS_GROUP_SIZE, INDEXER_API_URL, LSK_ENCRYPTED_OUTPUTS, LSK_FETCH_OFFSET, PROGRAM_ID } from './utils/constants.js';
-import { logger } from './utils/logger.js';
+import { logger, conditionalLog, conditionalError } from './utils/logger.js';
 import type { CacheStorage } from './index.js';
 import { encryptStorageKeyName, decryptStorageKeyName } from './utils/storage-key-encryption.js';
 
@@ -56,14 +56,14 @@ export async function localstorageKey(key: PublicKey, encryptionKey: string | nu
     const contractPrefix = PROGRAM_ID.toString().substring(0, 6);
     const keyString = key.toString();
     
-    console.log(`🔑 [localstorageKey] Called with encryptionKey: ${!!encryptionKey ? 'YES' : 'NO'}, type: ${typeof encryptionKey}, length: ${encryptionKey ? encryptionKey.length : 0}`);
-    console.error(`🔑 [localstorageKey ERROR CHANNEL] encryptionKey: ${!!encryptionKey ? 'YES' : 'NO'}`);
+    conditionalLog(`🔑 [localstorageKey] Called with encryptionKey: ${!!encryptionKey ? 'YES' : 'NO'}, type: ${typeof encryptionKey}, length: ${encryptionKey ? encryptionKey.length : 0}`);
+    conditionalError(`🔑 [localstorageKey ERROR CHANNEL] encryptionKey: ${!!encryptionKey ? 'YES' : 'NO'}`);
     
     // Encryption key is REQUIRED - no hashing fallback
     if (!encryptionKey) {
         const error = new Error('Encryption key is required for storage key generation. Wallet must be unlocked with password.');
-        console.error(`❌ [localstorageKey] Encryption key missing:`, error);
-        console.error(`❌ [localstorageKey ERROR CHANNEL] Encryption key required`);
+        conditionalError(`❌ [localstorageKey] Encryption key missing:`, error);
+        conditionalError(`❌ [localstorageKey ERROR CHANNEL] Encryption key required`);
         throw error;
     }
     
@@ -71,23 +71,23 @@ export async function localstorageKey(key: PublicKey, encryptionKey: string | nu
     const cacheKey = `${keyString}:${encryptionKey}`;
     if (publicKeyEncryptionCache.has(cacheKey)) {
         const cached = publicKeyEncryptionCache.get(cacheKey)!;
-        console.log(`🔑 [localstorageKey] Using cached encrypted key, length: ${cached.length}`);
-        console.error(`🔑 [localstorageKey ERROR CHANNEL] Using cached encrypted key`);
+        conditionalLog(`🔑 [localstorageKey] Using cached encrypted key, length: ${cached.length}`);
+        conditionalError(`🔑 [localstorageKey ERROR CHANNEL] Using cached encrypted key`);
         return contractPrefix + cached;
     }
     
-    console.log(`🔑 [localstorageKey] Calling encryptStorageKeyName...`);
-    console.error(`🔑 [localstorageKey ERROR CHANNEL] Calling encryptStorageKeyName`);
+    conditionalLog(`🔑 [localstorageKey] Calling encryptStorageKeyName...`);
+    conditionalError(`🔑 [localstorageKey ERROR CHANNEL] Calling encryptStorageKeyName`);
     let encryptedKey: string;
     try {
         encryptedKey = await encryptStorageKeyName(keyString, encryptionKey);
-        console.log(`🔑 [localstorageKey] encryptStorageKeyName returned, length: ${encryptedKey.length}, preview: ${encryptedKey.slice(0, 30)}...`);
-        console.error(`🔑 [localstorageKey ERROR CHANNEL] encryptStorageKeyName returned`);
+        conditionalLog(`🔑 [localstorageKey] encryptStorageKeyName returned, length: ${encryptedKey.length}, preview: ${encryptedKey.slice(0, 30)}...`);
+        conditionalError(`🔑 [localstorageKey ERROR CHANNEL] encryptStorageKeyName returned`);
         publicKeyEncryptionCache.set(cacheKey, encryptedKey);
         return contractPrefix + encryptedKey;
     } catch (error) {
-        console.error(`❌ [localstorageKey] encryptStorageKeyName failed:`, error);
-        console.error(`❌ [localstorageKey ERROR CHANNEL] Encryption failed: ${error}`);
+        conditionalError(`❌ [localstorageKey] encryptStorageKeyName failed:`, error);
+        conditionalError(`❌ [localstorageKey ERROR CHANNEL] Encryption failed: ${error}`);
         throw error;
     }
 }
@@ -324,7 +324,7 @@ export async function isUtxoSpent(connection: Connection, utxo: Utxo): Promise<b
         }
         return false;
     } catch (error: any) {
-        console.error('Error checking if UTXO is spent:', error);
+        conditionalError('Error checking if UTXO is spent:', error);
         await new Promise(resolve => setTimeout(resolve, 3000));
         return await isUtxoSpent(connection, utxo)
     }
@@ -370,7 +370,7 @@ async function areUtxosSpent(
 
         return spentFlags;
     } catch (error: any) {
-        console.error("Error checking if UTXOs are spent:", error);
+        conditionalError("Error checking if UTXOs are spent:", error);
         await new Promise((resolve) => setTimeout(resolve, 3000));
         return await areUtxosSpent(connection, utxos);
     }

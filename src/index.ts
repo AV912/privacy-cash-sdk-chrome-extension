@@ -3,7 +3,7 @@ import { deposit } from './deposit.js';
 import { getBalanceFromUtxos, getUtxos, localstorageKey } from './getUtxos.js';
 
 import { LSK_ENCRYPTED_OUTPUTS, LSK_FETCH_OFFSET } from './utils/constants.js';
-import { logger, type LoggerFn, setLogger } from './utils/logger.js';
+import { logger, type LoggerFn, setLogger, conditionalLog, conditionalError, conditionalWarn, conditionalInfo } from './utils/logger.js';
 import { EncryptionService } from './utils/encryption.js';
 import { WasmFactory } from '@lightprotocol/hasher.rs';
 import bs58 from 'bs58'
@@ -74,21 +74,21 @@ export class PrivacyCash {
         if (!enableDebug) {
             this.startStatusRender()
             this.setLogger((level, message) => {
-                // Always log to console so logging service can capture it
+                // Only log to console if logging is enabled
                 switch (level) {
                     case 'error':
-                        console.error(message);
+                        conditionalError(message);
                         break;
                     case 'warn':
-                        console.warn(message);
+                        conditionalWarn(message);
                         break;
                     case 'info':
                         this.status = message; // Store for status display
-                        console.info(message); // Also log to console for capture
+                        conditionalInfo(message); // Also log to console for capture
                         break;
                     case 'debug':
                     default:
-                        console.log(message);
+                        conditionalLog(message);
                         break;
                 }
             })
@@ -181,7 +181,7 @@ export class PrivacyCash {
             storage: this.storage,
             storageKeyEncryptionKey: this.storageKeyEncryptionKey
         })
-        console.log(`Withdraw successful. Recipient ${recipient} received ${res.amount_in_lamports / LAMPORTS_PER_SOL} SOL, with ${res.fee_in_lamports / LAMPORTS_PER_SOL} SOL relayers fees`)
+        conditionalLog(`Withdraw successful. Recipient ${recipient} received ${res.amount_in_lamports / LAMPORTS_PER_SOL} SOL, with ${res.fee_in_lamports / LAMPORTS_PER_SOL} SOL relayers fees`)
         this.isRuning = false
         return res
     }
@@ -190,9 +190,9 @@ export class PrivacyCash {
      * Returns the amount of lamports current wallet has in Privacy Cash.
      */
     async getPrivateBalance() {
-        // Use console.log directly to ensure visibility in browser console
-        console.log('%c🔐 [PRIVACY SDK] getPrivateBalance() CALLED', 'color: red; font-size: 16px; font-weight: bold;');
-        console.error('🔐 [PRIVACY SDK ERROR CHANNEL] getPrivateBalance() called');
+        // Conditionally log if logging is enabled
+        conditionalLog('%c🔐 [PRIVACY SDK] getPrivateBalance() CALLED', 'color: red; font-size: 16px; font-weight: bold;');
+        conditionalError('🔐 [PRIVACY SDK ERROR CHANNEL] getPrivateBalance() called');
         logger.info('getting private balance')
         this.isRuning = true
         let utxos = await getUtxos({ 

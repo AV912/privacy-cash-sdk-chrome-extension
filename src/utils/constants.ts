@@ -24,3 +24,7 @@ export const SIGN_MESSAGE = `Privacy Money account sign in`
 // localStorage cache keys
 export const LSK_FETCH_OFFSET = 'fetch_offset'
 export const LSK_ENCRYPTED_OUTPUTS = 'encrypted_outputs'
+
+// Console logging configuration
+// Set to false to disable console output (logs will still be saved if using logger utility)
+export const CONSOLE_LOGGING_ENABLED = false;

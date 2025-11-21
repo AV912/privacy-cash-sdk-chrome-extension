@@ -12,6 +12,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { wtns, groth16 } from 'snarkjs'
 import { FIELD_SIZE } from './constants.js'
+import { conditionalError } from './logger.js';
 
 // @ts-ignore - ignore TypeScript errors for ffjavascript
 import { utils } from 'ffjavascript'
@@ -135,7 +136,7 @@ export function parseProofToBytesArray(
       proofC: [mydata.pi_c[0], mydata.pi_c[1]].flat(),
     };
   } catch (error: any) {
-    console.error("Error while parsing the proof.", error.message);
+    conditionalError("Error while parsing the proof.", error.message);
     throw error;
   }
 }
@@ -155,7 +156,7 @@ export function parseToBytesArray(publicSignals: string[]): number[][] {
 
     return publicInputsBytes;
   } catch (error: any) {
-    console.error("Error while parsing public inputs.", error.message);
+    conditionalError("Error while parsing public inputs.", error.message);
     throw error;
   }
 }

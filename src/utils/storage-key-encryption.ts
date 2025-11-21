@@ -1,3 +1,5 @@
+import { conditionalLog, conditionalError } from './logger.js';
+
 /**
  * Storage Key Encryption Utility
  * 
@@ -24,9 +26,9 @@ export async function encryptStorageKeyName(
   encryptionKey: string
 ): Promise<string> {
   try {
-    console.log(`🔐 [ENCRYPT] Starting encryption for public key: ${publicKeyString.slice(0, 8)}...`);
-    console.log(`🔐 [ENCRYPT] Encryption key length: ${encryptionKey.length}, preview: ${encryptionKey.slice(0, 20)}...`);
-    console.error(`🔐 [ENCRYPT ERROR CHANNEL] Starting encryption`);
+    conditionalLog(`🔐 [ENCRYPT] Starting encryption for public key: ${publicKeyString.slice(0, 8)}...`);
+    conditionalLog(`🔐 [ENCRYPT] Encryption key length: ${encryptionKey.length}, preview: ${encryptionKey.slice(0, 20)}...`);
+    conditionalError(`🔐 [ENCRYPT ERROR CHANNEL] Starting encryption`);
     
     // Decode the encryption key from base64
     let keyBytes: Uint8Array;
@@ -36,11 +38,11 @@ export async function encryptStorageKeyName(
       for (let i = 0; i < decoded.length; i++) {
         keyBytes[i] = decoded.charCodeAt(i);
       }
-      console.log(`🔐 [ENCRYPT] Decoded key bytes length: ${keyBytes.length}`);
-      console.error(`🔐 [ENCRYPT ERROR CHANNEL] Decoded key bytes length: ${keyBytes.length}`);
+      conditionalLog(`🔐 [ENCRYPT] Decoded key bytes length: ${keyBytes.length}`);
+      conditionalError(`🔐 [ENCRYPT ERROR CHANNEL] Decoded key bytes length: ${keyBytes.length}`);
     } catch (e) {
-      console.error(`❌ [ENCRYPT] Failed to decode base64 key:`, e);
-      console.error(`❌ [ENCRYPT ERROR CHANNEL] Base64 decode failed: ${e}`);
+      conditionalError(`❌ [ENCRYPT] Failed to decode base64 key:`, e);
+      conditionalError(`❌ [ENCRYPT ERROR CHANNEL] Base64 decode failed: ${e}`);
       throw new Error(`Invalid base64 encryption key: ${e}`);
     }
     
@@ -54,11 +56,11 @@ export async function encryptStorageKeyName(
         false,
         ['encrypt']
       );
-      console.log(`🔐 [ENCRYPT] Successfully imported crypto key`);
-      console.error(`🔐 [ENCRYPT ERROR CHANNEL] Crypto key imported`);
+      conditionalLog(`🔐 [ENCRYPT] Successfully imported crypto key`);
+      conditionalError(`🔐 [ENCRYPT ERROR CHANNEL] Crypto key imported`);
     } catch (e) {
-      console.error(`❌ [ENCRYPT] Failed to import crypto key:`, e);
-      console.error(`❌ [ENCRYPT ERROR CHANNEL] Crypto key import failed: ${e}`);
+      conditionalError(`❌ [ENCRYPT] Failed to import crypto key:`, e);
+      conditionalError(`❌ [ENCRYPT ERROR CHANNEL] Crypto key import failed: ${e}`);
       throw new Error(`Failed to import encryption key: ${e}`);
     }
     
@@ -81,11 +83,11 @@ export async function encryptStorageKeyName(
         cryptoKey,
         dataToEncrypt
       );
-      console.log(`🔐 [ENCRYPT] Successfully encrypted data, length: ${encryptedBuffer.byteLength}`);
-      console.error(`🔐 [ENCRYPT ERROR CHANNEL] Encryption successful`);
+      conditionalLog(`🔐 [ENCRYPT] Successfully encrypted data, length: ${encryptedBuffer.byteLength}`);
+      conditionalError(`🔐 [ENCRYPT ERROR CHANNEL] Encryption successful`);
     } catch (e) {
-      console.error(`❌ [ENCRYPT] Failed to encrypt data:`, e);
-      console.error(`❌ [ENCRYPT ERROR CHANNEL] Encryption failed: ${e}`);
+      conditionalError(`❌ [ENCRYPT] Failed to encrypt data:`, e);
+      conditionalError(`❌ [ENCRYPT ERROR CHANNEL] Encryption failed: ${e}`);
       throw new Error(`Failed to encrypt data: ${e}`);
     }
     
@@ -100,13 +102,13 @@ export async function encryptStorageKeyName(
     const base64 = btoa(String.fromCharCode(...combinedArray));
     const base64url = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
     
-    console.log(`🔐 [ENCRYPT] Encryption complete, result length: ${base64url.length}, preview: ${base64url.slice(0, 30)}...`);
-    console.error(`🔐 [ENCRYPT ERROR CHANNEL] Encryption complete`);
+    conditionalLog(`🔐 [ENCRYPT] Encryption complete, result length: ${base64url.length}, preview: ${base64url.slice(0, 30)}...`);
+    conditionalError(`🔐 [ENCRYPT ERROR CHANNEL] Encryption complete`);
     
     return base64url;
   } catch (error) {
-    console.error('❌ [ENCRYPT] Storage key encryption error:', error);
-    console.error(`❌ [ENCRYPT ERROR CHANNEL] Encryption error: ${error}`);
+    conditionalError('❌ [ENCRYPT] Storage key encryption error:', error);
+    conditionalError(`❌ [ENCRYPT ERROR CHANNEL] Encryption error: ${error}`);
     throw new Error(`Failed to encrypt storage key name: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -168,7 +170,7 @@ export async function decryptStorageKeyName(
     const decrypted = new TextDecoder().decode(decryptedBuffer);
     return decrypted;
   } catch (error) {
-    console.error('Storage key decryption error:', error);
+    conditionalError('Storage key decryption error:', error);
     throw new Error('Failed to decrypt storage key name');
   }
 }

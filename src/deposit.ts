@@ -10,7 +10,7 @@ import { Keypair as UtxoKeypair } from './models/keypair.js';
 import { getUtxos, isUtxoSpent } from './getUtxos.js';
 import { FIELD_SIZE, FEE_RECIPIENT, MERKLE_TREE_DEPTH, INDEXER_API_URL, PROGRAM_ID } from './utils/constants.js';
 import { useExistingALT } from './utils/address_lookup_table.js';
-import { logger } from './utils/logger.js';
+import { logger, conditionalLog, conditionalError } from './utils/logger.js';
 import type { CacheStorage } from './index.js';
 
 
@@ -49,7 +49,7 @@ async function relayDepositToIndexer(signedTransaction: string, publicKey: Publi
 
         return result.signature;
     } catch (error) {
-        console.error('Failed to relay deposit transaction to indexer:', error);
+        conditionalError('Failed to relay deposit transaction to indexer:', error);
         throw error;
     }
 }
@@ -454,22 +454,22 @@ async function checkDepositLimit(connection: Connection) {
         const accountInfo = await connection.getAccountInfo(treeAccount);
 
         if (!accountInfo) {
-            console.error('❌ Tree account not found. Make sure the program is initialized.');
+            conditionalError('❌ Tree account not found. Make sure the program is initialized.');
             return;
         }
 
-        console.log(`Account data size: ${accountInfo.data.length} bytes`);
+        conditionalLog(`Account data size: ${accountInfo.data.length} bytes`);
         const authority = new PublicKey(accountInfo.data.slice(8, 40));
         const nextIndex = new BN(accountInfo.data.slice(40, 48), 'le');
         const rootIndex = new BN(accountInfo.data.slice(4112, 4120), 'le');
         const maxDepositAmount = new BN(accountInfo.data.slice(4120, 4128), 'le');
         const bump = accountInfo.data[4128];
 
-        console.log('\n📋 MerkleTreeAccount Details:');
-        console.log(`┌─ Authority: ${authority.toString()}`);
-        console.log(`├─ Next Index: ${nextIndex.toString()}`);
-        console.log(`├─ Root Index: ${rootIndex.toString()}`);
-        console.log(`├─ Max Deposit Amount: ${maxDepositAmount.toString()} lamports`);
+        conditionalLog('\n📋 MerkleTreeAccount Details:');
+        conditionalLog(`┌─ Authority: ${authority.toString()}`);
+        conditionalLog(`├─ Next Index: ${nextIndex.toString()}`);
+        conditionalLog(`├─ Root Index: ${rootIndex.toString()}`);
+        conditionalLog(`├─ Max Deposit Amount: ${maxDepositAmount.toString()} lamports`);
 
         // Convert to SOL using BN division to handle large numbers
         const lamportsPerSol = new BN(1_000_000_000);
@@ -485,11 +485,11 @@ async function checkDepositLimit(connection: Connection) {
             const fractional = remainder.toNumber() / 1e9;
             solFormatted = `${maxDepositSol.toString()}${fractional.toFixed(9).substring(1)}`;
         }
-        console.log('solFormatted', solFormatted)
+        conditionalLog('solFormatted', solFormatted)
         return Number(solFormatted)
 
     } catch (error) {
-        console.log('❌ Error reading deposit limit:', error);
+        conditionalLog('❌ Error reading deposit limit:', error);
         throw error
     }
 }

@@ -11,7 +11,7 @@ import { EncryptionService, serializeProofAndExtData } from './utils/encryption.
 import { fetchMerkleProof, findNullifierPDAs, getExtDataHash, getProgramAccounts, queryRemoteTreeState, findCrossCheckNullifierPDAs } from './utils/utils.js';
 
 import { getUtxos } from './getUtxos.js';
-import { logger } from './utils/logger.js';
+import { logger, conditionalLog } from './utils/logger.js';
 import { getConfig } from './config.js';
 import type { CacheStorage } from './index.js';
 // Indexer API endpoint
@@ -318,12 +318,12 @@ export async function withdraw({ recipient, lightWasm, storage, publicKey, conne
     const encryptedOutputStr = Buffer.from(encryptedOutput1).toString('hex')
     let start = Date.now()
     while (true) {
-        console.log(`retryTimes: ${retryTimes}`)
+        conditionalLog(`retryTimes: ${retryTimes}`)
         await new Promise(resolve => setTimeout(resolve, itv * 1000));
-        console.log('Fetching updated tree state...');
+        conditionalLog('Fetching updated tree state...');
         let res = await fetch(INDEXER_API_URL + '/utxos/check/' + encryptedOutputStr)
         let resJson = await res.json()
-        console.log('resJson:', resJson)
+        conditionalLog('resJson:', resJson)
         if (resJson.exists) {
             return { isPartial, tx: signature, recipient: recipient.toString(), amount_in_lamports, fee_in_lamports }
         }

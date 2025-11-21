@@ -2,6 +2,7 @@ import {
   Connection, 
   PublicKey
 } from '@solana/web3.js';
+import { conditionalLog, conditionalError } from './logger.js';
 
 /**
  * Helper function to use an existing ALT (recommended for production)
@@ -12,18 +13,18 @@ export async function useExistingALT(
   altAddress: PublicKey
 ): Promise<{ value: any } | null> {
   try {
-    console.log(`Using existing ALT: ${altAddress.toString()}`);
+    conditionalLog(`Using existing ALT: ${altAddress.toString()}`);
     const altAccount = await connection.getAddressLookupTable(altAddress);
     
     if (altAccount.value) {
-      console.log(`✅ ALT found with ${altAccount.value.state.addresses.length} addresses`);
+      conditionalLog(`✅ ALT found with ${altAccount.value.state.addresses.length} addresses`);
     } else {
-      console.log('❌ ALT not found');
+      conditionalLog('❌ ALT not found');
     }
     
     return altAccount;
   } catch (error) {
-    console.error('Error getting existing ALT:', error);
+    conditionalError('Error getting existing ALT:', error);
     return null;
   }
 } 
