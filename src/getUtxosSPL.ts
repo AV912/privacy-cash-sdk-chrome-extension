@@ -171,7 +171,7 @@ export async function getUtxosSPL({ publicKey, connection, encryptionService, st
 async function fetchUserUtxos({ url, storage, encryptionService, publicKey_ata, tokenName }: {
     url: string,
     encryptionService: EncryptionService,
-    storage: Storage,
+    storage: CacheStorage,
     publicKey_ata: PublicKey
     tokenName: string
 }): Promise<{
