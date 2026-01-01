@@ -1,14 +1,18 @@
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import { deposit } from './deposit.js';
 import { getBalanceFromUtxos, getUtxos, localstorageKey } from './getUtxos.js';
+import { getBalanceFromUtxosSPL, getUtxosSPL } from './getUtxosSPL.js';
 
-import { LSK_ENCRYPTED_OUTPUTS, LSK_FETCH_OFFSET } from './utils/constants.js';
+import { LSK_ENCRYPTED_OUTPUTS, LSK_FETCH_OFFSET, SplList, TokenList, tokens, USDC_MINT } from './utils/constants.js';
 import { logger, type LoggerFn, setLogger, conditionalLog, conditionalError, conditionalWarn, conditionalInfo } from './utils/logger.js';
 import { EncryptionService } from './utils/encryption.js';
 import { WasmFactory } from '@lightprotocol/hasher.rs';
 import bs58 from 'bs58'
 import { withdraw } from './withdraw.js';
 import path from 'node:path'
+import { depositSPL } from './depositSPL.js';
+import { withdrawSPL } from './withdrawSPL.js';
+import { getAssociatedTokenAddress } from '@solana/spl-token';
 
 // Storage interface for cache persistence
 export interface CacheStorage {
@@ -120,11 +124,24 @@ export class PrivacyCash {
         if (!this.publicKey) {
             return this
         }
+        // Clear SOL cache
         const storageKeySuffix = await localstorageKey(this.publicKey, this.storageKeyEncryptionKey);
         await Promise.all([
             this.storage.removeItem(LSK_FETCH_OFFSET + storageKeySuffix),
             this.storage.removeItem(LSK_ENCRYPTED_OUTPUTS + storageKeySuffix)
         ]);
+        // Clear SPL token caches
+        for (let token of tokens) {
+            let ata = await getAssociatedTokenAddress(
+                token.pubkey,
+                this.publicKey
+            );
+            const tokenStorageKeySuffix = await localstorageKey(ata, this.storageKeyEncryptionKey);
+            await Promise.all([
+                this.storage.removeItem(LSK_FETCH_OFFSET + tokenStorageKeySuffix),
+                this.storage.removeItem(LSK_ENCRYPTED_OUTPUTS + tokenStorageKeySuffix)
+            ]);
+        }
         return this
     }
 
@@ -142,6 +159,34 @@ export class PrivacyCash {
         let res = await deposit({
             lightWasm,
             amount_in_lamports: lamports,
+            connection: this.connection,
+            encryptionService: this.encryptionService,
+            publicKey: this.publicKey,
+            transactionSigner: async (tx: VersionedTransaction) => {
+                tx.sign([this.keypair])
+                return tx
+            },
+            keyBasePath: path.join(import.meta.dirname, '..', 'circuit2', 'transaction2'),
+            storage: this.storage,
+            storageKeyEncryptionKey: this.storageKeyEncryptionKey
+        })
+        this.isRuning = false
+        return res
+    }
+
+    /**
+    * Deposit USDC to the Privacy Cash.
+    */
+    async depositUSDC({ base_units }: {
+        base_units: number
+    }) {
+        this.isRuning = true
+        logger.info('start depositting')
+        let lightWasm = await WasmFactory.getInstance()
+        let res = await depositSPL({
+            mintAddress: USDC_MINT,
+            lightWasm,
+            base_units: base_units,
             connection: this.connection,
             encryptionService: this.encryptionService,
             publicKey: this.publicKey,
@@ -187,9 +232,39 @@ export class PrivacyCash {
     }
 
     /**
+      * Withdraw USDC from the Privacy Cash.
+      * 
+      * base_units is the amount of USDC in base unit. e.g. if you want to withdraw 1 USDC (1,000,000 base unit), call withdraw({ base_units: 1000000, recipientAddress: 'some_address' })
+      */
+    async withdrawUSDC({ base_units, recipientAddress }: {
+        base_units: number,
+        recipientAddress?: string
+    }) {
+        this.isRuning = true
+        logger.info('start withdrawing')
+        let lightWasm = await WasmFactory.getInstance()
+        let recipient = recipientAddress ? new PublicKey(recipientAddress) : this.publicKey
+        let res = await withdrawSPL({
+            mintAddress: USDC_MINT,
+            lightWasm,
+            base_units,
+            connection: this.connection,
+            encryptionService: this.encryptionService,
+            publicKey: this.publicKey,
+            recipient,
+            keyBasePath: path.join(import.meta.dirname, '..', 'circuit2', 'transaction2'),
+            storage: this.storage,
+            storageKeyEncryptionKey: this.storageKeyEncryptionKey
+        })
+        logger.debug(`Withdraw successful. Recipient ${recipient} received ${base_units} USDC units`)
+        this.isRuning = false
+        return res
+    }
+
+    /**
      * Returns the amount of lamports current wallet has in Privacy Cash.
      */
-    async getPrivateBalance() {
+    async getPrivateBalance(abortSignal?: AbortSignal) {
         // Conditionally log if logging is enabled
         conditionalLog('%c🔐 [PRIVACY SDK] getPrivateBalance() CALLED', 'color: red; font-size: 16px; font-weight: bold;');
         conditionalError('🔐 [PRIVACY SDK ERROR CHANNEL] getPrivateBalance() called');
@@ -200,10 +275,46 @@ export class PrivacyCash {
             connection: this.connection, 
             encryptionService: this.encryptionService, 
             storage: this.storage,
-            storageKeyEncryptionKey: this.storageKeyEncryptionKey
+            storageKeyEncryptionKey: this.storageKeyEncryptionKey,
+            abortSignal
         })
         this.isRuning = false
         return getBalanceFromUtxos(utxos)
+    }
+
+    /**
+    * Returns the amount of base units current wallet has in Privacy Cash for USDC.
+    */
+    async getPrivateBalanceUSDC() {
+        logger.info('getting private balance')
+        this.isRuning = true
+        let utxos = await getUtxosSPL({ 
+            publicKey: this.publicKey, 
+            connection: this.connection, 
+            encryptionService: this.encryptionService, 
+            storage: this.storage,
+            storageKeyEncryptionKey: this.storageKeyEncryptionKey,
+            mintAddress: USDC_MINT 
+        })
+        this.isRuning = false
+        return getBalanceFromUtxosSPL(utxos)
+    }
+
+    /**
+    * Returns the amount of base units current wallet has in Privacy Cash for any SPL token.
+    */
+    async getPrivateBalanceSpl(mintAddress: PublicKey | string) {
+        this.isRuning = true
+        let utxos = await getUtxosSPL({
+            publicKey: this.publicKey,
+            connection: this.connection,
+            encryptionService: this.encryptionService,
+            storage: this.storage,
+            storageKeyEncryptionKey: this.storageKeyEncryptionKey,
+            mintAddress
+        })
+        this.isRuning = false
+        return getBalanceFromUtxosSPL(utxos)
     }
 
     /**
@@ -225,6 +336,71 @@ export class PrivacyCash {
             await new Promise(r => setTimeout(r, 250));
         }
     }
+
+    /**
+   * Deposit SPL to the Privacy Cash.
+   */
+    async depositSPL({ base_units, mintAddress, amount }: {
+        base_units?: number,
+        amount?: number,
+        mintAddress: PublicKey | string
+    }) {
+        this.isRuning = true
+        logger.info('start depositting')
+        let lightWasm = await WasmFactory.getInstance()
+        let res = await depositSPL({
+            lightWasm,
+            base_units,
+            amount,
+            connection: this.connection,
+            encryptionService: this.encryptionService,
+            publicKey: this.publicKey,
+            transactionSigner: async (tx: VersionedTransaction) => {
+                tx.sign([this.keypair])
+                return tx
+            },
+            keyBasePath: path.join(import.meta.dirname, '..', 'circuit2', 'transaction2'),
+            storage: this.storage,
+            storageKeyEncryptionKey: this.storageKeyEncryptionKey,
+            mintAddress
+        })
+        this.isRuning = false
+        return res
+    }
+
+    /**
+      * Withdraw SPL from the Privacy Cash.
+      */
+    async withdrawSPL({ base_units, mintAddress, recipientAddress, amount }: {
+        base_units?: number,
+        amount?: number,
+        mintAddress: PublicKey | string,
+        recipientAddress?: string
+    }) {
+        this.isRuning = true
+        logger.info('start withdrawing')
+        let lightWasm = await WasmFactory.getInstance()
+        let recipient = recipientAddress ? new PublicKey(recipientAddress) : this.publicKey
+
+        let res = await withdrawSPL({
+            lightWasm,
+            base_units,
+            amount,
+            connection: this.connection,
+            encryptionService: this.encryptionService,
+            publicKey: this.publicKey,
+            recipient,
+            keyBasePath: path.join(import.meta.dirname, '..', 'circuit2', 'transaction2'),
+            storage: this.storage,
+            storageKeyEncryptionKey: this.storageKeyEncryptionKey,
+            mintAddress
+        })
+        logger.debug(`Withdraw successful. Recipient ${recipient} received ${base_units || amount || 0} token units`)
+        this.isRuning = false
+        return res
+    }
+
+
 }
 
 function getSolanaKeypair(
