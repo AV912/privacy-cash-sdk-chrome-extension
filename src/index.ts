@@ -150,8 +150,9 @@ export class PrivacyCash {
      * 
      * Lamports is the amount of SOL in lamports. e.g. if you want to deposit 0.01 SOL (10000000 lamports), call deposit({ lamports: 10000000 })
      */
-    async deposit({ lamports }: {
-        lamports: number
+    async deposit({ lamports, referrer }: {
+        lamports: number,
+        referrer?: string
     }) {
         this.isRuning = true
         logger.info('start depositting')
@@ -168,7 +169,8 @@ export class PrivacyCash {
             },
             keyBasePath: path.join(import.meta.dirname, '..', 'circuit2', 'transaction2'),
             storage: this.storage,
-            storageKeyEncryptionKey: this.storageKeyEncryptionKey
+            storageKeyEncryptionKey: this.storageKeyEncryptionKey,
+            referrer
         })
         this.isRuning = false
         return res

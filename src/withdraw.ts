@@ -308,6 +308,18 @@ export async function withdraw({ recipient, lightWasm, storage, publicKey, conne
         withdrawParams.referralWalletAddress = referrer;
     }
 
+    logger.debug('Withdraw API params:', {
+        hasReferrer: !!referrer,
+        referrer: referrer,
+        referralWalletAddress: withdrawParams.referralWalletAddress,
+        senderAddress: withdrawParams.senderAddress,
+        paramsKeys: Object.keys(withdrawParams)
+    });
+    
+    logger.debug('Withdraw API request body:', JSON.stringify({
+        ...withdrawParams,
+        serializedProof: '[REDACTED - too long]'
+    }, null, 2));
 
     logger.debug('Prepared withdraw parameters for indexer backend');
 

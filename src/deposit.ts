@@ -28,6 +28,19 @@ async function relayDepositToIndexer(signedTransaction: string, publicKey: Publi
             params.referralWalletAddress = referrer
         }
 
+        logger.debug('Deposit API params:', {
+            hasReferrer: !!referrer,
+            referrer: referrer,
+            referralWalletAddress: params.referralWalletAddress,
+            senderAddress: params.senderAddress,
+            paramsKeys: Object.keys(params)
+        });
+        
+        logger.debug('Deposit API request body (excluding signedTransaction):', {
+            senderAddress: params.senderAddress,
+            referralWalletAddress: params.referralWalletAddress
+        });
+
         const response = await fetch(`${RELAYER_API_URL}/deposit`, {
             method: 'POST',
             headers: {
