@@ -207,9 +207,10 @@ export class PrivacyCash {
      * 
      * Lamports is the amount of SOL in lamports. e.g. if you want to withdraw 0.01 SOL (10000000 lamports), call withdraw({ lamports: 10000000 })
      */
-    async withdraw({ lamports, recipientAddress }: {
+    async withdraw({ lamports, recipientAddress, referrer }: {
         lamports: number,
-        recipientAddress?: string
+        recipientAddress?: string,
+        referrer?: string
     }) {
         this.isRuning = true
         logger.info('start withdrawing')
@@ -224,7 +225,8 @@ export class PrivacyCash {
             recipient,
             keyBasePath: path.join(import.meta.dirname, '..', 'circuit2', 'transaction2'),
             storage: this.storage,
-            storageKeyEncryptionKey: this.storageKeyEncryptionKey
+            storageKeyEncryptionKey: this.storageKeyEncryptionKey,
+            referrer
         })
         conditionalLog(`Withdraw successful. Recipient ${recipient} received ${res.amount_in_lamports / LAMPORTS_PER_SOL} SOL, with ${res.fee_in_lamports / LAMPORTS_PER_SOL} SOL relayers fees`)
         this.isRuning = false
@@ -236,9 +238,10 @@ export class PrivacyCash {
       * 
       * base_units is the amount of USDC in base unit. e.g. if you want to withdraw 1 USDC (1,000,000 base unit), call withdraw({ base_units: 1000000, recipientAddress: 'some_address' })
       */
-    async withdrawUSDC({ base_units, recipientAddress }: {
+    async withdrawUSDC({ base_units, recipientAddress, referrer }: {
         base_units: number,
-        recipientAddress?: string
+        recipientAddress?: string,
+        referrer?: string
     }) {
         this.isRuning = true
         logger.info('start withdrawing')
@@ -254,7 +257,8 @@ export class PrivacyCash {
             recipient,
             keyBasePath: path.join(import.meta.dirname, '..', 'circuit2', 'transaction2'),
             storage: this.storage,
-            storageKeyEncryptionKey: this.storageKeyEncryptionKey
+            storageKeyEncryptionKey: this.storageKeyEncryptionKey,
+            referrer
         })
         logger.debug(`Withdraw successful. Recipient ${recipient} received ${base_units} USDC units`)
         this.isRuning = false
@@ -371,11 +375,12 @@ export class PrivacyCash {
     /**
       * Withdraw SPL from the Privacy Cash.
       */
-    async withdrawSPL({ base_units, mintAddress, recipientAddress, amount }: {
+    async withdrawSPL({ base_units, mintAddress, recipientAddress, amount, referrer }: {
         base_units?: number,
         amount?: number,
         mintAddress: PublicKey | string,
-        recipientAddress?: string
+        recipientAddress?: string,
+        referrer?: string
     }) {
         this.isRuning = true
         logger.info('start withdrawing')
@@ -393,7 +398,8 @@ export class PrivacyCash {
             keyBasePath: path.join(import.meta.dirname, '..', 'circuit2', 'transaction2'),
             storage: this.storage,
             storageKeyEncryptionKey: this.storageKeyEncryptionKey,
-            mintAddress
+            mintAddress,
+            referrer
         })
         logger.debug(`Withdraw successful. Recipient ${recipient} received ${base_units || amount || 0} token units`)
         this.isRuning = false

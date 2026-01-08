@@ -54,10 +54,11 @@ type WithdrawParams = {
     lightWasm: hasher.LightWasm,
     recipient: PublicKey,
     storage: CacheStorage,
-    storageKeyEncryptionKey?: string | null
+    storageKeyEncryptionKey?: string | null,
+    referrer?: string,
 }
 
-export async function withdraw({ recipient, lightWasm, storage, publicKey, connection, amount_in_lamports, encryptionService, keyBasePath, storageKeyEncryptionKey }: WithdrawParams) {
+export async function withdraw({ recipient, lightWasm, storage, publicKey, connection, amount_in_lamports, encryptionService, keyBasePath, storageKeyEncryptionKey, referrer }: WithdrawParams) {
     let fee_in_lamports = amount_in_lamports * (await getConfig('withdraw_fee_rate')) + LAMPORTS_PER_SOL * (await getConfig('withdraw_rent_fee'))
     amount_in_lamports -= fee_in_lamports
     let isPartial = false
@@ -284,7 +285,7 @@ export async function withdraw({ recipient, lightWasm, storage, publicKey, conne
     logger.debug(`Total instruction data size: ${serializedProof.length} bytes`);
 
     // Prepare withdraw parameters for indexer backend
-    const withdrawParams = {
+    const withdrawParams: any = {
         serializedProof: serializedProof.toString('base64'),
         treeAccount: treeAccount.toString(),
         nullifier0PDA: nullifier0PDA.toString(),
@@ -300,8 +301,12 @@ export async function withdraw({ recipient, lightWasm, storage, publicKey, conne
         encryptedOutput2: encryptedOutput2.toString('base64'),
         fee: fee_in_lamports,
         lookupTableAddress: ALT_ADDRESS.toString(),
-        senderAddress: publicKey.toString()
+        senderAddress: publicKey.toString(),
     };
+
+    if (referrer) {
+        withdrawParams.referralWalletAddress = referrer;
+    }
 
 
     logger.debug('Prepared withdraw parameters for indexer backend');
@@ -316,7 +321,9 @@ export async function withdraw({ recipient, lightWasm, storage, publicKey, conne
     const encryptedOutputStr = Buffer.from(encryptedOutput1).toString('hex')
     let start = Date.now()
     while (true) {
+        logger.info('Confirming transaction..')
         conditionalLog(`retryTimes: ${retryTimes}`)
+        logger.debug(`retryTimes: ${retryTimes}`)
         await new Promise(resolve => setTimeout(resolve, itv * 1000));
         conditionalLog('Fetching updated tree state...');
         let res = await fetch(RELAYER_API_URL + '/utxos/check/' + encryptedOutputStr)

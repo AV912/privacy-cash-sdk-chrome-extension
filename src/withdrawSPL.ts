@@ -56,10 +56,11 @@ type WithdrawParams = {
     recipient: PublicKey,
     mintAddress: PublicKey | string,
     storage: CacheStorage,
-    storageKeyEncryptionKey?: string | null
+    storageKeyEncryptionKey?: string | null,
+    referrer?: string,
 }
 
-export async function withdrawSPL({ recipient, lightWasm, storage, publicKey, connection, base_units, amount, encryptionService, keyBasePath, mintAddress }: WithdrawParams) {
+export async function withdrawSPL({ recipient, lightWasm, storage, publicKey, connection, base_units, amount, encryptionService, keyBasePath, mintAddress, storageKeyEncryptionKey, referrer }: WithdrawParams) {
     if (typeof mintAddress == 'string') {
         mintAddress = new PublicKey(mintAddress)
     }
@@ -139,7 +140,7 @@ export async function withdrawSPL({ recipient, lightWasm, storage, publicKey, co
 
     // Fetch existing UTXOs for this user
     logger.debug('\nFetching existing UTXOs...');
-    const mintUtxos = await getUtxosSPL({ connection, publicKey, encryptionService, storage, mintAddress });
+    const mintUtxos = await getUtxosSPL({ connection, publicKey, encryptionService, storage, mintAddress, storageKeyEncryptionKey });
 
     logger.debug(`Found ${mintUtxos.length} total UTXOs for ${token.name}`);
 
@@ -347,7 +348,7 @@ export async function withdrawSPL({ recipient, lightWasm, storage, publicKey, co
     const treeAta = getAssociatedTokenAddressSync(token.pubkey, globalConfigPda, true);
 
     // Prepare withdraw parameters for indexer backend
-    const withdrawParams = {
+    const withdrawParams: any = {
         serializedProof: serializedProof.toString('base64'),
         treeAccount: treeAccount.toString(),
         nullifier0PDA: nullifier0PDA.toString(),
@@ -365,9 +366,12 @@ export async function withdrawSPL({ recipient, lightWasm, storage, publicKey, co
         treeAta: treeAta.toString(),
         recipientAta: recipient_ata.toString(),
         mintAddress: token.pubkey.toString(),
-        feeRecipientTokenAccount: feeRecipientTokenAccount.toString()
+        feeRecipientTokenAccount: feeRecipientTokenAccount.toString(),
     };
 
+    if (referrer) {
+        withdrawParams.referralWalletAddress = referrer;
+    }
 
     logger.debug('Prepared withdraw parameters for indexer backend');
 
@@ -381,7 +385,8 @@ export async function withdrawSPL({ recipient, lightWasm, storage, publicKey, co
     const encryptedOutputStr = Buffer.from(encryptedOutput1).toString('hex')
     let start = Date.now()
     while (true) {
-        logger.info(`retryTimes: ${retryTimes}`)
+        logger.info('Confirming transaction..')
+        logger.debug(`retryTimes: ${retryTimes}`)
         await new Promise(resolve => setTimeout(resolve, itv * 1000));
         logger.info('Fetching updated tree state...');
         let res = await fetch(RELAYER_API_URL + '/utxos/check/' + encryptedOutputStr + '?token=' + token.name)
